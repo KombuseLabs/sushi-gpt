@@ -124,8 +124,7 @@ async fn exercise(mode: &str) -> anyhow::Result<()> {
     );
     assert_eq!(failed, matches!(mode, "early_exit" | "error" | "cancel"));
     if mode == "cancel" {
-        let state = transport.state.lock().await;
-        assert!(state.failed && state.session.is_none());
+        assert!(matches!(*transport.state.lock().await, State::Failed));
         let pid: i32 = std::fs::read_to_string(executable.with_extension("py.pid"))?.parse()?;
         // Signal zero only checks the fixture process, after the adapter has reaped it.
         assert_eq!(unsafe { libc::kill(pid, 0) }, -1);

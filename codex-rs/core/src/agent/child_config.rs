@@ -4,7 +4,7 @@
 //! inheritance, and validation messages remain the same for each multi-agent version.
 
 #[path = "model_routing/mod.rs"]
-mod model_routing;
+pub(crate) mod model_routing;
 
 use crate::agent::role::DEFAULT_ROLE_NAME;
 use crate::agent::role::apply_role_to_config;
@@ -66,7 +66,7 @@ pub(crate) async fn prepare_agent_spawn_config(
         reject_full_fork_agent_type_override(options.role_name)?;
     }
     let routing = model_routing::select(session, step_context, &config, &options).await?;
-    routing.apply_provider(&mut config, &session.services.extensions)?;
+    model_routing::apply_provider(&routing, &mut config, &session.services.extensions)?;
     apply_requested_spawn_agent_model_overrides(
         session,
         step_context,
@@ -112,10 +112,9 @@ pub(crate) async fn prepare_agent_spawn_config(
             .then_some(DEFAULT_ROLE_NAME)
         })
         .map(str::to_owned);
-    routing.validate_selection(&config)?;
-    routing.log_resolved(&config);
+    model_routing::validate_selection(&routing, &config)?;
     Ok(PreparedSpawnConfig {
-        routing: routing.decision(&config),
+        routing: model_routing::finish(routing, &config),
         config,
         role_name,
     })
@@ -215,13 +214,25 @@ fn apply_spawn_agent_runtime_overrides(
     Ok(())
 }
 
-async fn apply_requested_spawn_agent_model_overrides(
+/// What a spawn request's model and effort resolve to before anything is written to the config.
+pub(super) enum SpawnModelResolution {
+    Unchanged,
+    Model {
+        name: String,
+        reasoning_effort: Option<ReasoningEffort>,
+    },
+    ReasoningEffort(ReasoningEffort),
+}
+
+/// Validates the requested model and effort against the catalog without mutating `config`,
+/// so candidate checks and the real override share one definition.
+pub(super) async fn resolve_requested_spawn_agent_model(
     session: &Session,
     step_context: &StepContext,
-    config: &mut Config,
+    config: &Config,
     requested_model: Option<&str>,
     requested_reasoning_effort: Option<ReasoningEffort>,
-) -> Result<(), String> {
+) -> Result<SpawnModelResolution, String> {
     let turn = step_context.turn.as_ref();
     let requested_model = requested_model.or(turn.config.agent_default_subagent_model.as_deref());
     let requested_reasoning_effort = requested_reasoning_effort.or_else(|| {
@@ -229,17 +240,13 @@ async fn apply_requested_spawn_agent_model_overrides(
             .then(|| turn.config.agent_default_subagent_reasoning_effort.clone())
             .flatten()
     });
-    if requested_model.is_none() && requested_reasoning_effort.is_none() {
-        return Ok(());
-    }
-
     if let Some(requested_model) = requested_model {
         let available_models = session
             .services
             .models_manager
             .list_models(RefreshStrategy::Offline, config.http_client_factory())
             .await;
-        let selected_model_name = find_spawn_agent_model_name(
+        let name = find_spawn_agent_model_name(
             &available_models,
             requested_model,
             turn.multi_agent_version,
@@ -247,33 +254,63 @@ async fn apply_requested_spawn_agent_model_overrides(
         let selected_model_info = session
             .services
             .models_manager
-            .get_model_info(&selected_model_name, &config.to_models_manager_config())
+            .get_model_info(&name, &config.to_models_manager_config())
             .await;
+        let reasoning_effort = match requested_reasoning_effort {
+            Some(reasoning_effort) => {
+                validate_spawn_agent_reasoning_effort(
+                    &name,
+                    &selected_model_info.supported_reasoning_levels,
+                    &reasoning_effort,
+                )?;
+                Some(reasoning_effort)
+            }
+            None => selected_model_info.default_reasoning_level,
+        };
+        return Ok(SpawnModelResolution::Model {
+            name,
+            reasoning_effort,
+        });
+    }
+    let Some(reasoning_effort) = requested_reasoning_effort else {
+        return Ok(SpawnModelResolution::Unchanged);
+    };
+    validate_spawn_agent_reasoning_effort(
+        &step_context.settings.model_info.slug,
+        &step_context.settings.model_info.supported_reasoning_levels,
+        &reasoning_effort,
+    )?;
+    Ok(SpawnModelResolution::ReasoningEffort(reasoning_effort))
+}
 
-        config.model = Some(selected_model_name.clone());
-        if let Some(reasoning_effort) = requested_reasoning_effort {
-            validate_spawn_agent_reasoning_effort(
-                &selected_model_name,
-                &selected_model_info.supported_reasoning_levels,
-                &reasoning_effort,
-            )?;
-            config.model_reasoning_effort = Some(reasoning_effort);
-        } else {
-            config.model_reasoning_effort = selected_model_info.default_reasoning_level;
+async fn apply_requested_spawn_agent_model_overrides(
+    session: &Session,
+    step_context: &StepContext,
+    config: &mut Config,
+    requested_model: Option<&str>,
+    requested_reasoning_effort: Option<ReasoningEffort>,
+) -> Result<(), String> {
+    match resolve_requested_spawn_agent_model(
+        session,
+        step_context,
+        config,
+        requested_model,
+        requested_reasoning_effort,
+    )
+    .await?
+    {
+        SpawnModelResolution::Unchanged => {}
+        SpawnModelResolution::Model {
+            name,
+            reasoning_effort,
+        } => {
+            config.model = Some(name);
+            config.model_reasoning_effort = reasoning_effort;
         }
-
-        return Ok(());
+        SpawnModelResolution::ReasoningEffort(reasoning_effort) => {
+            config.model_reasoning_effort = Some(reasoning_effort);
+        }
     }
-
-    if let Some(reasoning_effort) = requested_reasoning_effort {
-        validate_spawn_agent_reasoning_effort(
-            &step_context.settings.model_info.slug,
-            &step_context.settings.model_info.supported_reasoning_levels,
-            &reasoning_effort,
-        )?;
-        config.model_reasoning_effort = Some(reasoning_effort);
-    }
-
     Ok(())
 }
 

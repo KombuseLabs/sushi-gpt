@@ -1,6 +1,8 @@
 //! Core-owned projections for optional native model execution extensions.
 use crate::client_common::Prompt;
+use crate::client_common::ResponseStream;
 use crate::responses_metadata::CodexResponsesMetadata;
+use codex_extension_api::ModelTransportStream;
 use codex_extension_api::RequestMetadata;
 use codex_extension_api::SamplingPrompt;
 impl From<&Prompt> for SamplingPrompt {
@@ -24,6 +26,15 @@ impl From<&CodexResponsesMetadata> for RequestMetadata {
             parent_thread_id: m.parent_thread_id,
             parent_turn_id: m.parent_turn_id.clone(),
             root_turn_id: m.root_turn_id.clone(),
+        }
+    }
+}
+impl From<ModelTransportStream> for ResponseStream {
+    fn from(s: ModelTransportStream) -> Self {
+        Self {
+            rx_event: s.rx_event,
+            tool_result_tx: s.tool_result_tx,
+            consumer_dropped: s.consumer_dropped,
         }
     }
 }

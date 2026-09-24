@@ -98,8 +98,7 @@ impl<T: HttpTransport> ResponsesClient<T> {
         } else {
             (EncodedJsonBody::encode(&request), None)
         };
-        let body =
-            body.map_err(|e| ApiError::Stream(format!("failed to encode responses request: {e}")))?;
+        let body = body.map_err(encode_error)?;
 
         let mut headers = extra_headers;
         if let Some(ref thread_id) = thread_id {
@@ -110,13 +109,8 @@ impl<T: HttpTransport> ResponsesClient<T> {
             insert_header(&mut headers, "x-openai-subagent", &subagent);
         }
 
-        let stream = self
-            .stream_encoded(body, headers, compression, turn_state)
-            .await?;
-        Ok(match adapter {
-            Some(adapter) => adapter.wrap(stream),
-            None => stream,
-        })
+        self.stream_adapted(body, adapter, headers, compression, turn_state)
+            .await
     }
 
     #[instrument(
@@ -142,8 +136,20 @@ impl<T: HttpTransport> ResponsesClient<T> {
         } else {
             None
         };
-        let body = EncodedJsonBody::encode(&body)
-            .map_err(|e| ApiError::Stream(format!("failed to encode responses request: {e}")))?;
+        let body = EncodedJsonBody::encode(&body).map_err(encode_error)?;
+        self.stream_adapted(body, adapter, extra_headers, compression, turn_state)
+            .await
+    }
+
+    /// Streams an encoded body, translating events back through the adapter when one applies.
+    async fn stream_adapted(
+        &self,
+        body: EncodedJsonBody,
+        adapter: Option<crate::openresponses::Adapter>,
+        extra_headers: HeaderMap,
+        compression: Compression,
+        turn_state: Option<Arc<OnceLock<String>>>,
+    ) -> Result<ResponseStream, ApiError> {
         let stream = self
             .stream_encoded(body, extra_headers, compression, turn_state)
             .await?;
@@ -189,4 +195,8 @@ impl<T: HttpTransport> ResponsesClient<T> {
             turn_state,
         ))
     }
+}
+
+fn encode_error(error: impl std::fmt::Display) -> ApiError {
+    ApiError::Stream(format!("failed to encode responses request: {error}"))
 }

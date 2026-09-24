@@ -18,7 +18,6 @@ pub enum Reason {
     FullHistory,
     RoutingOff,
     ControlInvalid,
-    NoRule,
     RuleMatched,
     JevSelected,
     InvalidTargetSettings,
@@ -89,7 +88,6 @@ impl Decision {
             | Reason::Explicit
             | Reason::FullHistory
             | Reason::RoutingOff
-            | Reason::NoRule
             | Reason::RulesOnly
             | Reason::JevDisabled => Source::Native,
             _ => Source::Fallback,
@@ -106,14 +104,6 @@ impl Decision {
             source,
             reason_code,
         })
-    }
-
-    pub fn record(mut self, call_id: &str, child_thread_id: Option<ThreadId>) {
-        self.call_id = identifier(call_id);
-        self.child_thread_id = child_thread_id;
-        if let Some(emitter) = writer::emitter() {
-            emitter.emit(Record::RoutingDecision(self));
-        }
     }
 }
 
@@ -138,17 +128,6 @@ impl codex_extension_api::ModelRequestObserver for Observer {
         RequestAttempt::start(metadata, model).map(|attempt| Box::new(attempt) as _)
     }
 }
-impl codex_extension_api::ModelRequestAttempt for RequestAttempt {
-    fn set_request_id(&mut self, id: Option<&str>) {
-        self.set_request_id(id);
-    }
-    fn set_cli_transport(&mut self, instance: &str, version: &str) {
-        self.set_cli_transport(instance, version);
-    }
-    fn observe(&mut self, event: &codex_api::ResponseEvent) {
-        self.observe(event);
-    }
-}
 pub fn install<C: Sync>(registry: &mut codex_extension_api::ExtensionRegistryBuilder<C>) {
     registry.model_request_observer(std::sync::Arc::new(Observer));
 }
@@ -157,7 +136,11 @@ impl codex_extension_api::RoutingObserver for Decision {
     fn resolved(&mut self, model: Option<&str>) {
         self.selected_model = model.and_then(identifier);
     }
-    fn record(self: Box<Self>, call_id: &str, child: Option<ThreadId>) {
-        (*self).record(call_id, child);
+    fn record(mut self: Box<Self>, call_id: &str, child_thread_id: Option<ThreadId>) {
+        self.call_id = identifier(call_id);
+        self.child_thread_id = child_thread_id;
+        if let Some(emitter) = writer::emitter() {
+            emitter.emit(Record::RoutingDecision(*self));
+        }
     }
 }

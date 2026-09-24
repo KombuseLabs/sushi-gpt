@@ -19,40 +19,37 @@ use serde::Deserialize;
 use serde_json::Value;
 
 pub fn map_api_error(err: ApiError) -> CodexErr {
-    use codex_protocol::execution_error::ExecutionErrorStage;
+    use codex_protocol::execution_error::ExecutionErrorStage as Stage;
+    // Only a provider 400 carries typed validation details worth extracting.
+    let validation = |status: &http::StatusCode, body: &str| {
+        (*status == http::StatusCode::BAD_REQUEST)
+            .then(|| crate::provider_validation::extract(body))
+    };
     let context = match &err {
-        ApiError::Api { status, .. } | ApiError::Transport(TransportError::Http { status, .. }) => {
-            Some((ExecutionErrorStage::ProviderResponse, Some(status.as_u16())))
-        }
+        ApiError::Api { status, message } => Some((
+            Stage::ProviderResponse,
+            Some(status.as_u16()),
+            validation(status, message),
+        )),
+        ApiError::Transport(TransportError::Http { status, body, .. }) => Some((
+            Stage::ProviderResponse,
+            Some(status.as_u16()),
+            validation(status, body.as_deref().unwrap_or_default()),
+        )),
         ApiError::Transport(TransportError::Build(_)) => {
-            Some((ExecutionErrorStage::RequestPreparation, None))
+            Some((Stage::RequestPreparation, None, None))
         }
         ApiError::Transport(TransportError::ResponseTooLarge { .. }) => {
-            Some((ExecutionErrorStage::ProviderResponse, None))
+            Some((Stage::ProviderResponse, None, None))
         }
-        ApiError::Transport(_) => Some((ExecutionErrorStage::Transport, None)),
-        _ => None,
-    };
-    let validation = match &err {
-        ApiError::Transport(TransportError::Http { status, body, .. })
-            if *status == http::StatusCode::BAD_REQUEST =>
-        {
-            Some(crate::provider_validation::extract(
-                body.as_deref().unwrap_or_default(),
-            ))
-        }
-        ApiError::Api { status, message } if *status == http::StatusCode::BAD_REQUEST => {
-            Some(crate::provider_validation::extract(message))
-        }
+        ApiError::Transport(_) => Some((Stage::Transport, None, None)),
         _ => None,
     };
     let error = map_api_error_details(err);
-    let error = match context {
-        Some((stage, status)) => error.with_execution_context(stage, status),
-        None => error,
-    };
-    match validation {
-        Some(validation) => error.with_provider_validation(validation),
+    match context {
+        Some((stage, status, validation)) => {
+            error.with_execution_context(stage, status, validation)
+        }
         None => error,
     }
 }

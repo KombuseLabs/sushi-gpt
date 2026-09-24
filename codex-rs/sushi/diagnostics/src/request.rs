@@ -2,6 +2,7 @@ use super::Record;
 use super::identifier;
 use super::writer;
 use codex_api::ResponseEvent;
+use codex_extension_api::ModelRequestAttempt;
 use codex_extension_api::RequestMetadata as CodexResponsesMetadata;
 use codex_protocol::protocol::TokenUsage;
 use serde::Serialize;
@@ -100,14 +101,16 @@ impl RequestAttempt {
             }),
         }
     }
+}
 
-    pub fn set_request_id(&mut self, request_id: Option<&str>) {
+impl ModelRequestAttempt for RequestAttempt {
+    fn set_request_id(&mut self, request_id: Option<&str>) {
         if let Some(record) = &mut self.record {
             record.request_id = request_id.and_then(identifier);
         }
     }
 
-    pub fn set_cli_transport(&mut self, instance: &str, version: &str) {
+    fn set_cli_transport(&mut self, instance: &str, version: &str) {
         if let Some(record) = &mut self.record {
             record.transport = Some("claude_cli");
             record.transport_instance_id = identifier(instance);
@@ -115,7 +118,7 @@ impl RequestAttempt {
         }
     }
 
-    pub fn observe(&mut self, event: &ResponseEvent) {
+    fn observe(&mut self, event: &ResponseEvent) {
         let Some(record) = &mut self.record else {
             return;
         };

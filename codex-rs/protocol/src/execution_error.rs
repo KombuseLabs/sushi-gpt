@@ -114,25 +114,19 @@ pub(crate) struct ExecutionErrorContext {
 
 impl CodexErr {
     /// Preserve the innermost known boundary without changing retry or display behavior.
+    /// Validation details are typed and bounded; existing specific error codes still take priority.
     pub fn with_execution_context(
         mut self,
         stage: ExecutionErrorStage,
         http_status_code: Option<u16>,
+        provider_validation: Option<ProviderValidation>,
     ) -> Self {
         if self.execution_context.is_none() {
             self.execution_context = Some(ExecutionErrorContext {
                 stage,
                 http_status_code,
-                provider_validation: None,
+                provider_validation,
             });
-        }
-        self
-    }
-
-    /// Add only typed, bounded validation diagnostics; existing specific error codes still take priority.
-    pub fn with_provider_validation(mut self, validation: ProviderValidation) -> Self {
-        if let Some(context) = self.execution_context.as_mut() {
-            context.provider_validation = Some(validation);
         }
         self
     }

@@ -19,6 +19,8 @@ struct Tool {
 #[derive(Debug)]
 pub struct Adapter {
     tools: BTreeMap<String, Tool>,
+    /// (namespace, name) -> alias, the reverse of `tools`, for O(log n) history rewrites.
+    aliases: BTreeMap<(Option<String>, String), String>,
 }
 
 fn unsupported() -> ApiError {
@@ -49,6 +51,7 @@ impl Adapter {
         }
         let mut adapter = Self {
             tools: BTreeMap::new(),
+            aliases: BTreeMap::new(),
         };
         let mut flattened = Vec::new();
         for tool in body["tools"].as_array().into_iter().flatten() {
@@ -70,14 +73,12 @@ impl Adapter {
                     .as_str()
                     .ok_or_else(unsupported)?
                     .to_string();
-                if adapter
-                    .tools
-                    .values()
-                    .any(|t| t.name == name && t.namespace == namespace)
-                {
+                let key = (namespace.clone(), name.clone());
+                if adapter.aliases.contains_key(&key) {
                     return Err(unsupported());
                 }
                 let alias = format!("codex_tool_{}", adapter.tools.len());
+                adapter.aliases.insert(key, alias.clone());
                 if custom {
                     definition["parameters"] = json!({"type":"object","properties":{"input":{"type":"string"}},"required":["input"],"additionalProperties":false});
                 }
@@ -105,50 +106,7 @@ impl Adapter {
         }
         body["tools"] = Value::Array(flattened);
         for item in body["input"].as_array_mut().ok_or_else(unsupported)? {
-            match item["type"].as_str() {
-                Some("agent_message") => {
-                    let content = item["content"].as_array().ok_or_else(unsupported)?;
-                    if content.iter().any(|c| c["type"] != "input_text") {
-                        return Err(unsupported());
-                    }
-                    *item = json!({"type":"message","role":"user","content":content});
-                }
-                Some("function_call" | "custom_tool_call") => {
-                    let namespace = item["namespace"].as_str();
-                    let name = item["name"].as_str().ok_or_else(unsupported)?;
-                    let (alias, tool) = adapter
-                        .tools
-                        .iter()
-                        .find(|(_, t)| t.name == name && t.namespace.as_deref() == namespace)
-                        .ok_or_else(unsupported)?;
-                    if tool.custom {
-                        item["arguments"] = json!(json!({"input":item["input"]}).to_string());
-                    }
-                    item["type"] = json!("function_call");
-                    item["name"] = json!(alias);
-                    let object = item.as_object_mut().ok_or_else(unsupported)?;
-                    object.remove("namespace");
-                    object.remove("input");
-                    object.remove("encrypted_function_args");
-                }
-                Some("custom_tool_call_output") => {
-                    item["type"] = json!("function_call_output");
-                }
-                Some("message" | "function_call_output") => {}
-                _ => return Err(unsupported()),
-            }
-            let kind = item["type"].as_str().ok_or_else(unsupported)?.to_string();
-            item.as_object_mut()
-                .ok_or_else(unsupported)?
-                .retain(|key, _| match kind.as_str() {
-                    "message" => matches!(key.as_str(), "type" | "role" | "content" | "id"),
-                    "function_call" => matches!(
-                        key.as_str(),
-                        "type" | "name" | "arguments" | "call_id" | "id"
-                    ),
-                    "function_call_output" => matches!(key.as_str(), "type" | "call_id" | "output"),
-                    _ => false,
-                });
+            adapter.prepare_item(item)?;
         }
         body["store"] = json!(false);
         body["stream"] = json!(true);
@@ -177,6 +135,57 @@ impl Adapter {
             )
         });
         Ok(adapter)
+    }
+
+    /// Rewrites one native input item in place into the flattened tool vocabulary.
+    pub fn prepare_item(&self, item: &mut Value) -> Result<(), ApiError> {
+        if contains_encryption(item) {
+            return Err(unsupported());
+        }
+        match item["type"].as_str() {
+            Some("agent_message") => {
+                let content = item["content"].as_array().ok_or_else(unsupported)?;
+                if content.iter().any(|c| c["type"] != "input_text") {
+                    return Err(unsupported());
+                }
+                *item = json!({"type":"message","role":"user","content":content});
+            }
+            Some("function_call" | "custom_tool_call") => {
+                let key = (
+                    item["namespace"].as_str().map(str::to_owned),
+                    item["name"].as_str().ok_or_else(unsupported)?.to_owned(),
+                );
+                let alias = self.aliases.get(&key).ok_or_else(unsupported)?;
+                let tool = self.tools.get(alias).ok_or_else(unsupported)?;
+                if tool.custom {
+                    item["arguments"] = json!(json!({"input":item["input"]}).to_string());
+                }
+                item["type"] = json!("function_call");
+                item["name"] = json!(alias);
+                let object = item.as_object_mut().ok_or_else(unsupported)?;
+                object.remove("namespace");
+                object.remove("input");
+                object.remove("encrypted_function_args");
+            }
+            Some("custom_tool_call_output") => {
+                item["type"] = json!("function_call_output");
+            }
+            Some("message" | "function_call_output") => {}
+            _ => return Err(unsupported()),
+        }
+        let kind = item["type"].as_str().ok_or_else(unsupported)?.to_string();
+        item.as_object_mut()
+            .ok_or_else(unsupported)?
+            .retain(|key, _| match kind.as_str() {
+                "message" => matches!(key.as_str(), "type" | "role" | "content" | "id"),
+                "function_call" => matches!(
+                    key.as_str(),
+                    "type" | "name" | "arguments" | "call_id" | "id"
+                ),
+                "function_call_output" => matches!(key.as_str(), "type" | "call_id" | "output"),
+                _ => false,
+            });
+        Ok(())
     }
 
     pub fn restore(&self, item: ResponseItem, done: bool) -> Result<ResponseItem, ApiError> {

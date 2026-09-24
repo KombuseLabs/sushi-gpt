@@ -2,21 +2,12 @@
 use super::*;
 use anyhow::Context;
 use core_test_support::responses::mount_response_once_match;
+use core_test_support::responses::request_body_json;
 use core_test_support::responses::sse_response;
 use pretty_assertions::assert_eq;
 
 fn child_request(request: &wiremock::Request) -> bool {
-    let body = if request
-        .headers
-        .get("content-encoding")
-        .is_some_and(|h| h == "zstd")
-    {
-        zstd::stream::decode_all(std::io::Cursor::new(&request.body)).expect("decode mock request")
-    } else {
-        request.body.clone()
-    };
-    let body: serde_json::Value = serde_json::from_slice(&body).expect("parse mock request");
-    body["client_metadata"]["x-codex-parent-thread-id"].is_string()
+    request_body_json(request)["client_metadata"]["x-codex-parent-thread-id"].is_string()
 }
 
 pub(super) async fn verify_runtime_control(key: &str) -> Result<()> {

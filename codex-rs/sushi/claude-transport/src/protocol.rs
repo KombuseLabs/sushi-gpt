@@ -102,14 +102,13 @@ impl MessageStream {
                             .ok_or_else(|| failure("delta for unknown block"))?;
                         match event["delta"]["type"].as_str() {
                             Some("text_delta") if block["type"] == "text" => {
-                                let text = format!(
-                                    "{}{}",
-                                    block["text"].as_str().unwrap_or_default(),
-                                    event["delta"]["text"]
-                                        .as_str()
-                                        .ok_or_else(|| failure("invalid text delta"))?
-                                );
-                                block["text"] = json!(text);
+                                let delta = event["delta"]["text"]
+                                    .as_str()
+                                    .ok_or_else(|| failure("invalid text delta"))?;
+                                match block.get_mut("text") {
+                                    Some(Value::String(text)) => text.push_str(delta),
+                                    _ => block["text"] = json!(delta),
+                                }
                             }
                             Some("input_json_delta") if block["type"] == "tool_use" => {
                                 self.arguments.entry(index).or_default().push_str(

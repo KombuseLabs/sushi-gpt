@@ -81,23 +81,55 @@ struct Transport {
     observer: Option<Arc<dyn ModelRequestObserver>>,
 }
 
-#[derive(Debug, Default)]
-struct State {
-    session: Option<Session>,
-    failed: bool,
-    active: bool,
+/// Exactly one of: parked (optionally holding a reusable CLI session), streaming, or failed.
+// One session per transport, behind a mutex; boxing it would only add an allocation.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
+enum State {
+    Idle(Option<Session>),
+    Active,
+    Failed,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self::Idle(None)
+    }
 }
 
 impl State {
     fn take_session(&mut self) -> Result<Option<Session>> {
-        if self.failed {
-            return Err(failure("session failed; replay is disabled"));
+        match std::mem::replace(self, State::Active) {
+            State::Idle(session) => Ok(session),
+            State::Active => {
+                *self = State::Active;
+                Err(failure("overlapping native sampling requests"))
+            }
+            State::Failed => {
+                *self = State::Failed;
+                Err(failure("session failed; replay is disabled"))
+            }
         }
-        if self.active {
-            return Err(failure("overlapping native sampling requests"));
+    }
+
+    fn take_idle(&mut self) -> Option<Session> {
+        match self {
+            State::Idle(session) => session.take(),
+            State::Active | State::Failed => None,
         }
-        self.active = true;
-        Ok(self.session.take())
+    }
+
+    /// Fails the transport and returns a session parked mid-turn for the given native turn.
+    fn fail_parked(&mut self, turn_id: &Option<String>) -> Option<Session> {
+        match self {
+            State::Idle(Some(session)) if session.in_turn && session.turn_id == *turn_id => {
+                let State::Idle(session) = std::mem::replace(self, State::Failed) else {
+                    return None;
+                };
+                session
+            }
+            _ => None,
+        }
     }
 }
 
@@ -107,7 +139,7 @@ impl Drop for Transport {
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
             let state = Arc::clone(&self.state);
             runtime.spawn(async move {
-                let session = { state.lock().await.session.take() };
+                let session = { state.lock().await.take_idle() };
                 if let Some(mut session) = session {
                     session.stop().await;
                 }
@@ -149,19 +181,7 @@ impl Transport {
         tokio::spawn(async move {
             turn_watch.cancelled().await;
             if let Some(state) = weak.upgrade() {
-                let session = {
-                    let mut state = state.lock().await;
-                    if state
-                        .session
-                        .as_ref()
-                        .is_some_and(|s| s.in_turn && s.turn_id == turn_id)
-                    {
-                        state.failed = true;
-                        state.session.take()
-                    } else {
-                        None
-                    }
-                };
+                let session = { state.lock().await.fail_parked(&turn_id) };
                 if let Some(mut session) = session {
                     session.stop().await;
                 }
@@ -198,19 +218,18 @@ impl Transport {
             };
             {
                 let mut state = state.lock().await;
-                state.active = false;
                 if cancel.is_cancelled()
                     || shutdown.is_cancelled()
                     || (turn_cancel.is_cancelled() && session.as_ref().is_some_and(|s| s.in_turn))
                 {
                     outcome = Err(CodexErr::TurnAborted);
                 }
-                if outcome.is_ok() {
-                    // Publish ownership before completion can make the native turn drop.
-                    state.session = session.take();
+                // Publish ownership before completion can make the native turn drop.
+                *state = if outcome.is_ok() {
+                    State::Idle(session.take())
                 } else {
-                    state.failed = true;
-                }
+                    State::Failed
+                };
             }
             if let Some(mut session) = session {
                 session.stop().await;
@@ -229,7 +248,8 @@ impl Transport {
 struct ToolCall {
     name: String,
     arguments: Value,
-    item: ResponseItem,
+    /// Taken when the CLI's MCP request for this call arrives and the item is emitted.
+    item: Option<ResponseItem>,
     request: Option<Value>,
     finished: bool,
 }

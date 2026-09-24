@@ -19,6 +19,7 @@ use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call_with_namespace;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_sse_once_match;
+use core_test_support::responses::request_body_contains as body_contains;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::test_codex::test_codex;
@@ -70,21 +71,6 @@ enum RoutingCase {
     RoleMismatch,
     FirstMatch,
     PlaintextV2,
-}
-
-fn body_contains(request: &wiremock::Request, needle: &str) -> bool {
-    let body = match request
-        .headers
-        .get("content-encoding")
-        .and_then(|value| value.to_str().ok())
-    {
-        Some(encoding) if encoding.eq_ignore_ascii_case("zstd") => {
-            zstd::stream::decode_all(std::io::Cursor::new(&request.body)).ok()
-        }
-        _ => Some(request.body.clone()),
-    };
-    body.and_then(|body| String::from_utf8(body).ok())
-        .is_some_and(|body| body.contains(needle))
 }
 
 #[test_case(Backend::V1, RoutingCase::Unregistered; "v1 configured routing requires registration")]

@@ -118,6 +118,27 @@ fn decode_body_bytes(body: &[u8], content_encoding: Option<&str>) -> Vec<u8> {
     }
 }
 
+/// Decodes a captured request body, honoring zstd content encoding.
+pub fn request_body_bytes(request: &wiremock::Request) -> Vec<u8> {
+    decode_body_bytes(
+        &request.body,
+        request
+            .headers
+            .get("content-encoding")
+            .and_then(|value| value.to_str().ok()),
+    )
+}
+
+/// Decodes a captured request body and checks it for a substring.
+pub fn request_body_contains(request: &wiremock::Request, needle: &str) -> bool {
+    String::from_utf8_lossy(&request_body_bytes(request)).contains(needle)
+}
+
+/// Decodes a captured request body as JSON.
+pub fn request_body_json(request: &wiremock::Request) -> Value {
+    serde_json::from_slice(&request_body_bytes(request)).expect("parse mock request")
+}
+
 /// Returns a response item without internal transport metadata for semantic assertions.
 pub fn strip_metadata(mut item: ResponseItem) -> ResponseItem {
     item.clear_internal_chat_message_metadata_passthrough();

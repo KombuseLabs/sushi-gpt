@@ -11,8 +11,13 @@ fn context_is_payload_free_and_preserves_retry_and_known_codes() -> serde_json::
         .with_execution_context(
             ExecutionErrorStage::StreamProcessing,
             /*http_status_code*/ None,
+            /*provider_validation*/ None,
         )
-        .with_execution_context(ExecutionErrorStage::RequestPreparation, Some(400));
+        .with_execution_context(
+            ExecutionErrorStage::RequestPreparation,
+            Some(400),
+            /*provider_validation*/ None,
+        );
     assert_eq!(
         error.retry_delay(/*retry_count*/ 1),
         Some(Duration::from_secs(7))
@@ -25,7 +30,11 @@ fn context_is_payload_free_and_preserves_retry_and_known_codes() -> serde_json::
     );
     assert_eq!(
         CodexErr::ServerOverloaded
-            .with_execution_context(ExecutionErrorStage::ProviderResponse, Some(503))
+            .with_execution_context(
+                ExecutionErrorStage::ProviderResponse,
+                Some(503),
+                /*provider_validation*/ None
+            )
             .to_codex_protocol_error(),
         CodexErrorInfo::ServerOverloaded,
     );
@@ -38,6 +47,7 @@ fn execution_context_roundtrips_as_a_known_classification() -> serde_json::Resul
         .with_execution_context(
             ExecutionErrorStage::RequestPreparation,
             /*http_status_code*/ None,
+            /*provider_validation*/ None,
         )
         .to_codex_protocol_error();
     let wire = serde_json::to_value(&info)?;

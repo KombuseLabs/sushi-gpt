@@ -142,7 +142,7 @@ impl Session {
                 break;
             }
             session
-                .control(&frame, &mut BTreeMap::new(), None, false)
+                .control(frame, &mut BTreeMap::new(), None, false)
                 .await?;
         }
         Ok(session)
@@ -200,14 +200,22 @@ impl Session {
                 break;
             }
         }
-        serde_json::from_slice(&std::mem::take(&mut self.frame))
-            .map_err(|_| failure("invalid CLI JSON"))
+        let parsed = serde_json::from_slice(&self.frame).map_err(|_| failure("invalid CLI JSON"));
+        self.frame.clear();
+        parsed
     }
 
     pub(super) fn remember(&mut self, item: &ResponseItem) -> Result<()> {
-        let mut body = json!({"input":[item],"tools":self.raw_tools});
-        Adapter::prepare(&mut body).map_err(|_| failure("cannot mirror native history"))?;
-        let mut item = body["input"][0].take();
+        let item =
+            serde_json::to_value(item).map_err(|_| failure("cannot mirror native history"))?;
+        self.remember_value(item)
+    }
+
+    /// Mirrors one already-serialized native item into the CLI-side history.
+    pub(super) fn remember_value(&mut self, mut item: Value) -> Result<()> {
+        self.adapter
+            .prepare_item(&mut item)
+            .map_err(|_| failure("cannot mirror native history"))?;
         if let Some(object) = item.as_object_mut() {
             object.remove("id");
         }
@@ -229,7 +237,7 @@ impl Session {
 
     pub(super) async fn control(
         &mut self,
-        frame: &Value,
+        frame: Value,
         calls: &mut BTreeMap<String, ToolCall>,
         sender: Option<&mpsc::Sender<Result<ResponseEvent>>>,
         defer_uncorrelated: bool,
@@ -269,8 +277,17 @@ impl Session {
                         let tool_use_id = message["params"]["_meta"]["claudecode/toolUseId"]
                             .as_str()
                             .filter(|id| calls.get(*id).is_some_and(|call| call.request.is_none()));
-                        let matches: Vec<_> = match tool_use_id {
-                            Some(id) => vec![id.to_owned()],
+                        let matches: Vec<String> = match tool_use_id {
+                            Some(id) => {
+                                let call =
+                                    calls.get(id).ok_or_else(|| failure("missing tool call"))?;
+                                if name != &call.name || arguments != &call.arguments {
+                                    return Err(failure(
+                                        "MCP tool call changed native tool arguments",
+                                    ));
+                                }
+                                vec![id.to_owned()]
+                            }
                             None => calls
                                 .iter()
                                 .filter(|(_, call)| {
@@ -284,23 +301,19 @@ impl Session {
                         if matches.is_empty() && defer_uncorrelated {
                             // The CLI issues tools/call before message_delta/message_stop; the
                             // model message that declares this call is still streaming.
-                            self.pending_tool_calls.push(frame.clone());
+                            self.pending_tool_calls.push(frame);
                             return Ok(());
                         }
                         if matches.len() != 1 {
                             return Err(failure("uncorrelated or ambiguous MCP tool call"));
                         }
                         let call = calls
-                            .get(&matches[0])
-                            .ok_or_else(|| failure("missing tool call"))?;
-                        if name != &call.name || arguments != &call.arguments {
-                            return Err(failure("MCP tool call changed native tool arguments"));
-                        }
-                        let call = calls
                             .get_mut(&matches[0])
                             .ok_or_else(|| failure("missing tool call"))?;
-                        call.request = Some(frame.clone());
-                        let item = call.item.clone();
+                        let item = call.item.take().ok_or_else(|| {
+                            failure("duplicate MCP request for a native tool call")
+                        })?;
+                        call.request = Some(frame);
                         self.emit(
                             sender.ok_or_else(|| failure("tool call during initialization"))?,
                             item,

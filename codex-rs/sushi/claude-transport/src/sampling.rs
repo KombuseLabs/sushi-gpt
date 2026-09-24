@@ -8,7 +8,7 @@ impl Session {
         sender: &mpsc::Sender<Result<ResponseEvent>>,
         results: &mut mpsc::Receiver<ResponseItem>,
     ) -> Result<ResponseEvent> {
-        let (_, body) = prepare(prompt)?;
+        let (_, mut body) = prepare(prompt)?;
         if model != self.model
             || prompt.base_instructions.text != self.instructions
             || serde_json::to_value(&prompt.tools).ok().as_ref() != Some(&self.raw_tools)
@@ -17,9 +17,9 @@ impl Session {
                 "changing models, tools or instructions requires a new child",
             ));
         }
-        let input = body["input"]
-            .as_array()
-            .ok_or_else(|| failure("invalid input"))?;
+        let Value::Array(input) = body["input"].take() else {
+            return Err(failure("invalid input"));
+        };
         if !input.starts_with(&self.history) {
             return Err(failure(
                 "native history changed; replay and compaction are unsupported",
@@ -37,7 +37,7 @@ impl Session {
             }
             new_text.push_str(&text_content(item)?);
         }
-        self.history = input.clone();
+        self.history = input;
         self.in_turn = true;
         if let Some(reply) = self.held_reply.take() {
             if !new_text.is_empty() {
@@ -85,7 +85,7 @@ impl Session {
                     let (content, is_error) = tool_result_content(&item, &raw["output"])?;
                     let reply = json!({"type":"control_response","response":{"subtype":"success","request_id":request["request_id"],"response":{"mcp_response":{"jsonrpc":"2.0","id":request["request"]["message"]["id"],"result":{"content":content,"isError":is_error}}}}});
                     call.finished = true;
-                    self.remember(&item)?;
+                    self.remember_value(raw)?;
                     if calls.values().all(|call| call.finished) {
                         // Native limits and cancellation run before releasing the final result.
                         self.held_reply = Some(reply);
@@ -111,7 +111,7 @@ impl Session {
             };
             match frame["type"].as_str() {
                 Some("control_request") => {
-                    self.control(&frame, &mut calls, Some(sender), true).await?
+                    self.control(frame, &mut calls, Some(sender), true).await?
                 }
                 Some("assistant") => {
                     if !frame["parent_tool_use_id"].is_null() || response_id.is_some() {
@@ -183,7 +183,7 @@ impl Session {
                                     ToolCall {
                                         name,
                                         arguments,
-                                        item,
+                                        item: Some(item),
                                         request: None,
                                         finished: false,
                                     },
@@ -211,7 +211,7 @@ impl Session {
                     }
                     // Correlate tools/call requests that arrived before this message completed.
                     for pending in std::mem::take(&mut self.pending_tool_calls) {
-                        self.control(&pending, &mut calls, Some(sender), false)
+                        self.control(pending, &mut calls, Some(sender), false)
                             .await?;
                     }
                 }

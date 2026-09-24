@@ -2221,11 +2221,7 @@ impl ModelClientSession {
                         self.transport_turn.clone(),
                     )
                     .await?;
-                Ok(ResponseStream {
-                    rx_event: stream.rx_event,
-                    tool_result_tx: stream.tool_result_tx,
-                    consumer_dropped: stream.consumer_dropped,
-                })
+                Ok(stream.into())
             }
             WireApi::Responses | WireApi::OpenResponses => {
                 if self.client.responses_websocket_enabled() {
@@ -2494,9 +2490,9 @@ where
                     } else {
                         codex_protocol::execution_error::ExecutionErrorStage::StreamProcessing
                     };
-                    let mapped = provider
-                        .map_api_error(err)
-                        .with_execution_context(stage, /*http_status_code*/ None);
+                    let mapped = provider.map_api_error(err).with_execution_context(
+                        stage, /*http_status_code*/ None, /*provider_validation*/ None,
+                    );
                     inference_trace_attempt.record_failed(
                         &mapped,
                         upstream_request_id,

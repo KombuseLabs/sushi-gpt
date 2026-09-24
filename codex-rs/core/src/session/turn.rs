@@ -2502,6 +2502,7 @@ async fn try_run_sampling_request(
             error.with_execution_context(
                 codex_protocol::execution_error::ExecutionErrorStage::RequestPreparation,
                 /*http_status_code*/ None,
+                /*provider_validation*/ None,
             )
         })?;
     let mut in_flight: FuturesOrdered<InFlightFuture<'static>> = FuturesOrdered::new();
@@ -3096,6 +3097,7 @@ async fn try_run_sampling_request(
         error.with_execution_context(
             codex_protocol::execution_error::ExecutionErrorStage::StreamProcessing,
             /*http_status_code*/ None,
+            /*provider_validation*/ None,
         )
     })
 }

@@ -10,6 +10,7 @@ use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::openai_models::ToolMode;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
+use core_test_support::responses::sse_response;
 use core_test_support::wait_for_event_match;
 use pretty_assertions::assert_eq;
 use wiremock::Mock;
@@ -22,9 +23,7 @@ const MODEL: &str = "synthetic-claude";
 const ASSIGNMENT: &str = "Create the synthetic document through the authorized host tool";
 
 fn response(events: Vec<serde_json::Value>) -> ResponseTemplate {
-    ResponseTemplate::new(200)
-        .insert_header("content-type", "text/event-stream")
-        .set_body_string(sse(events))
+    sse_response(sse(events))
 }
 
 #[test]

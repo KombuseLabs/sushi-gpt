@@ -33,8 +33,7 @@ use tracing::instrument;
 
 pub use crate::tools::context::ToolCallSource;
 
-// The backend owns and encrypts the agent tools under the default namespace; see `agent::model_routing`.
-use crate::config::DEFAULT_MULTI_AGENT_V2_TOOL_NAMESPACE as RESERVED_AGENT_TOOL_NAMESPACE;
+use crate::agent::child_config::model_routing::RESERVED_AGENT_TOOL_NAMESPACE;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ToolCall {

@@ -6,6 +6,7 @@ use codex_extension_api::ExtensionFuture;
 use codex_extension_api::RoutingHost;
 use codex_extension_api::RoutingRequest;
 use codex_extension_api::RoutingSelection;
+use codex_extension_api::RoutingSource;
 use codex_sushi_diagnostics::ClassifierAttempt;
 use codex_sushi_diagnostics::Decision;
 use codex_sushi_diagnostics::Reason;
@@ -57,37 +58,29 @@ async fn select(
             },
         );
     };
-    let mut reason = Reason::NoRule;
-    let mode = match control::read(request.codex_home).await {
-        Ok(mode) => mode,
-        Err(error) => {
-            tracing::warn!(target: "agent_model_routing", reason = ?error.kind(), "invalid routing control; using native defaults");
-            reason = Reason::ControlInvalid;
-            Mode::Off
-        }
-    };
     let mut selection = RoutingSelection {
-        source: Some("default"),
+        source: Some(RoutingSource::Default),
         ..Default::default()
     };
     if request.explicit_model.is_some() {
-        selection.source = Some("explicit");
+        selection.source = Some(RoutingSource::Explicit);
         return (selection, Reason::Explicit);
     }
     if request.full_history {
-        selection.source = Some("full_history");
+        selection.source = Some(RoutingSource::FullHistory);
         return (selection, Reason::FullHistory);
     }
+    // The control file is only consulted once the cheap native precedence rules have passed.
+    let (mode, off_reason) = match control::read(request.codex_home).await {
+        Ok(mode) => (mode, Reason::RoutingOff),
+        Err(error) => {
+            tracing::warn!(target: "agent_model_routing", reason = ?error.kind(), "invalid routing control; using native defaults");
+            (Mode::Off, Reason::ControlInvalid)
+        }
+    };
     if mode == Mode::Off {
-        selection.source = Some("disabled");
-        return (
-            selection,
-            if matches!(reason, Reason::ControlInvalid) {
-                reason
-            } else {
-                Reason::RoutingOff
-            },
-        );
+        selection.source = Some(RoutingSource::Disabled);
+        return (selection, off_reason);
     }
     if let Some(route) = routing.select(request.role, request.task) {
         return (
@@ -95,7 +88,7 @@ async fn select(
                 model_provider: route.model_provider.clone(),
                 model: Some(route.model.clone()),
                 reasoning_effort: route.reasoning_effort.clone(),
-                source: Some("rule"),
+                source: Some(RoutingSource::Rule),
                 observer: None,
             },
             Reason::RuleMatched,
@@ -147,17 +140,19 @@ async fn select(
             if let JevFallback::Http(status) = fallback {
                 attempt.http_status(status);
             }
-            reason = match fallback {
-                JevFallback::MissingKey => Reason::MissingKey,
-                JevFallback::Transport => Reason::Transport,
-                JevFallback::Timeout => Reason::Timeout,
-                JevFallback::Http(_) => Reason::Http,
-                JevFallback::OversizedResponse => Reason::OversizedResponse,
-                JevFallback::InvalidResponse => Reason::InvalidResponse,
-                JevFallback::Uncertain => Reason::Uncertain,
-            };
             tracing::info!(target: "agent_model_routing", ?fallback, "Jev routing fell back to native defaults");
-            return (selection, reason);
+            return (
+                selection,
+                match fallback {
+                    JevFallback::MissingKey => Reason::MissingKey,
+                    JevFallback::Transport => Reason::Transport,
+                    JevFallback::Timeout => Reason::Timeout,
+                    JevFallback::Http(_) => Reason::Http,
+                    JevFallback::OversizedResponse => Reason::OversizedResponse,
+                    JevFallback::InvalidResponse => Reason::InvalidResponse,
+                    JevFallback::Uncertain => Reason::Uncertain,
+                },
+            );
         }
     };
     tracing::info!(target: "agent_model_routing", source = "jev", class = %decision.choice, confidence = decision.confidence, classifier_model = %settings.model, "classifier selected a configured class");
@@ -172,7 +167,7 @@ async fn select(
     selection.model = Some(class.model.clone());
     selection.model_provider = class.model_provider.clone();
     selection.reasoning_effort = class.reasoning_effort.clone();
-    selection.source = Some("jev");
+    selection.source = Some(RoutingSource::Jev);
     (selection, Reason::JevSelected)
 }
 

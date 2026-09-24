@@ -10,12 +10,15 @@ use serde_json::json;
 #[test]
 fn execution_diagnostic_wire_contract_contains_only_typed_context() -> serde_json::Result<()> {
     let core = CodexErr::InvalidRequest("SECRET_PROVIDER_BODY".into())
-        .with_execution_context(ExecutionErrorStage::ProviderResponse, Some(400))
-        .with_provider_validation(ProviderValidation {
-            code: Some(ProviderValidationCode::InvalidValue),
-            parameter: Some(ProviderValidationParameter::ServiceTier),
-            tool_location: None,
-        })
+        .with_execution_context(
+            ExecutionErrorStage::ProviderResponse,
+            Some(400),
+            Some(ProviderValidation {
+                code: Some(ProviderValidationCode::InvalidValue),
+                parameter: Some(ProviderValidationParameter::ServiceTier),
+                tool_location: None,
+            }),
+        )
         .to_codex_protocol_error();
     let public = CodexErrorInfo::from(core);
     assert_eq!(
@@ -37,16 +40,19 @@ fn tool_location_survives_public_error_conversion() -> serde_json::Result<()> {
     use codex_protocol::execution_error::ProviderToolLocation;
 
     let core = CodexErr::InvalidRequest("PRIVATE_TEST_SENTINEL".into())
-        .with_execution_context(ExecutionErrorStage::ProviderResponse, Some(400))
-        .with_provider_validation(ProviderValidation {
-            code: Some(ProviderValidationCode::InvalidValue),
-            parameter: Some(ProviderValidationParameter::Tools),
-            tool_location: Some(ProviderToolLocation {
-                tool_index: 0,
-                nested_tool_index: Some(1),
-                field: Some(ProviderToolField::Format),
+        .with_execution_context(
+            ExecutionErrorStage::ProviderResponse,
+            Some(400),
+            Some(ProviderValidation {
+                code: Some(ProviderValidationCode::InvalidValue),
+                parameter: Some(ProviderValidationParameter::Tools),
+                tool_location: Some(ProviderToolLocation {
+                    tool_index: 0,
+                    nested_tool_index: Some(1),
+                    field: Some(ProviderToolField::Format),
+                }),
             }),
-        })
+        )
         .to_codex_protocol_error();
     let public = CodexErrorInfo::from(core);
     let wire = serde_json::to_value(&public)?;

@@ -41,13 +41,41 @@ pub struct RoutingRequest<'a> {
     pub http_client: HttpClientFactory,
 }
 
+/// Which routing stage produced a selection. `None` on a selection means routing never ran.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RoutingSource {
+    /// Routing ran but chose nothing; native defaults apply.
+    Default,
+    /// The caller named a model explicitly.
+    Explicit,
+    /// Full-history forks keep the parent's model.
+    FullHistory,
+    /// The runtime control file switched routing off.
+    Disabled,
+    Rule,
+    Jev,
+}
+
+impl RoutingSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Explicit => "explicit",
+            Self::FullHistory => "full_history",
+            Self::Disabled => "disabled",
+            Self::Rule => "rule",
+            Self::Jev => "jev",
+        }
+    }
+}
+
 /// A proposal only; the host owns provider, model, role, and runtime validation.
 #[derive(Default)]
 pub struct RoutingSelection {
     pub model_provider: Option<String>,
     pub model: Option<String>,
     pub reasoning_effort: Option<ReasoningEffort>,
-    pub source: Option<&'static str>,
+    pub source: Option<RoutingSource>,
     pub observer: Option<Box<dyn RoutingObserver>>,
 }
 

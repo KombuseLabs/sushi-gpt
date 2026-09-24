@@ -107,6 +107,7 @@ pub use model_execution::RoutingHost;
 pub use model_execution::RoutingObserver;
 pub use model_execution::RoutingRequest;
 pub use model_execution::RoutingSelection;
+pub use model_execution::RoutingSource;
 pub use model_execution::SamplingPrompt;
 pub use registry::ExtensionRegistry;
 pub use registry::ExtensionRegistryBuilder;
