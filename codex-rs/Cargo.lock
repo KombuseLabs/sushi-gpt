@@ -2104,6 +2104,9 @@ dependencies = [
  "codex-skills",
  "codex-skills-extension",
  "codex-state",
+ "codex-sushi-claude-transport",
+ "codex-sushi-diagnostics",
+ "codex-sushi-routing",
  "codex-thread-store",
  "codex-tools",
  "codex-uds",
@@ -2752,6 +2755,7 @@ dependencies = [
  "codex-model-provider-info",
  "codex-network-proxy",
  "codex-protocol",
+ "codex-sushi-routing-policy",
  "codex-utils-absolute-path",
  "codex-utils-path",
  "codex-utils-path-uri",
@@ -2910,6 +2914,7 @@ dependencies = [
  "codex-skills",
  "codex-skills-extension",
  "codex-state",
+ "codex-sushi-routing",
  "codex-terminal-detection",
  "codex-test-binary-support",
  "codex-thread-store",
@@ -3242,19 +3247,24 @@ dependencies = [
 name = "codex-extension-api"
 version = "0.0.0"
 dependencies = [
+ "codex-api",
  "codex-config",
  "codex-context-fragments",
  "codex-exec-server-protocol",
  "codex-file-system",
  "codex-history",
+ "codex-http-client",
  "codex-mcp",
+ "codex-model-provider-info",
  "codex-protocol",
  "codex-tools",
  "codex-utils-absolute-path",
  "codex-utils-path-uri",
+ "futures",
  "pretty_assertions",
  "serde_json",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -4542,6 +4552,75 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-sushi-claude-transport"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "codex-api",
+ "codex-extension-api",
+ "codex-model-provider-info",
+ "codex-protocol",
+ "codex-tools",
+ "futures",
+ "libc",
+ "pretty_assertions",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "uuid",
+]
+
+[[package]]
+name = "codex-sushi-diagnostics"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "codex-api",
+ "codex-extension-api",
+ "codex-protocol",
+ "libc",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "codex-sushi-routing"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "codex-extension-api",
+ "codex-http-client",
+ "codex-protocol",
+ "codex-sushi-diagnostics",
+ "codex-sushi-routing-policy",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "test-case",
+ "tokio",
+ "tracing",
+ "wiremock",
+]
+
+[[package]]
+name = "codex-sushi-routing-policy"
+version = "0.0.0"
+dependencies = [
+ "codex-protocol",
+ "pretty_assertions",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "toml 0.9.11+spec-1.1.0",
+]
+
+[[package]]
 name = "codex-tcp-tunnel"
 version = "0.0.0"
 dependencies = [
@@ -4585,6 +4664,9 @@ dependencies = [
  "anyhow",
  "clap",
  "codex-core-api",
+ "codex-sushi-claude-transport",
+ "codex-sushi-diagnostics",
+ "codex-sushi-routing",
  "serde_json",
  "tracing",
 ]
@@ -5462,6 +5544,9 @@ dependencies = [
  "codex-model-provider-info",
  "codex-models-manager",
  "codex-protocol",
+ "codex-sushi-claude-transport",
+ "codex-sushi-diagnostics",
+ "codex-sushi-routing",
  "codex-thread-store",
  "codex-utils-absolute-path",
  "codex-utils-cargo-bin",

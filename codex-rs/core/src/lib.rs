@@ -7,9 +7,9 @@
 
 mod apply_patch;
 mod apps;
-mod claude_cli;
 mod client;
 mod client_common;
+mod model_extensions;
 mod realtime_context;
 mod realtime_conversation;
 mod realtime_history;

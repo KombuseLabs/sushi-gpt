@@ -29,7 +29,7 @@ pub(super) struct Transition {
     http_status_code: Option<u16>,
 }
 
-pub(in super::super) struct ClassifierAttempt {
+pub struct ClassifierAttempt {
     emitter: Option<writer::Emitter>,
     transition: Transition,
     finished: bool,
@@ -37,7 +37,7 @@ pub(in super::super) struct ClassifierAttempt {
 }
 
 impl ClassifierAttempt {
-    pub(in super::super) fn new(thread_id: ThreadId, turn_id: &str) -> Self {
+    pub fn new(thread_id: ThreadId, turn_id: &str) -> Self {
         Self {
             emitter: writer::emitter().cloned(),
             transition: Transition {
@@ -55,22 +55,22 @@ impl ClassifierAttempt {
         }
     }
 
-    pub(in super::super) fn request_started(&mut self) {
+    pub fn request_started(&mut self) {
         self.transition.request_started = true;
         self.emit(Phase::RequestStarted, Reason::RequestStarted);
     }
 
-    pub(in super::super) fn recommended(&mut self, model: &str) {
+    pub fn recommended(&mut self, model: &str) {
         self.succeeded = true;
         self.transition.recommended_model = identifier(model);
         self.finish(Reason::JevSelected);
     }
 
-    pub(in super::super) fn http_status(&mut self, status: u16) {
+    pub fn http_status(&mut self, status: u16) {
         self.transition.http_status_code = Some(status);
     }
 
-    pub(in super::super) fn finish(&mut self, reason: Reason) {
+    pub fn finish(&mut self, reason: Reason) {
         if self.finished {
             return;
         }

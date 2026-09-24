@@ -4,8 +4,7 @@ codex_rust_crate(
     name = "core",
     compile_data = glob([
         "assets/**",
-        "tests/fixtures/claude_cli/**",
-    ]),
+    ]) + ["//codex-rs/sushi/claude-transport:tests/fixtures/peer.py"],
     crate_name = "codex_core",
     crate_srcs = glob(["src/**/*.rs"]) + [
         "//codex-rs/ext/guardian-v2:src/sync_reviewer/reviewer_config.rs",
@@ -23,8 +22,7 @@ codex_rust_crate(
     ],
     integration_compile_data_extra = glob([
         "assets/**",
-        "tests/fixtures/claude_cli/**",
-    ]),
+    ]) + ["//codex-rs/sushi/claude-transport:tests/fixtures/peer.py"],
     integration_test_timeout = "long",
     run_tests_with_wine_exec = True,
     rustc_env = {

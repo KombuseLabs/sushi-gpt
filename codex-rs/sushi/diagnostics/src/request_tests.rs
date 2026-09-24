@@ -6,18 +6,13 @@ use serde_json::json;
 fn sushi_telemetry_records_only_observed_usage_and_server_model() -> anyhow::Result<()> {
     let home = tempfile::tempdir()?;
     let (emitter, worker) = writer::open(home.path())?;
-    let mut metadata = CodexResponsesMetadata::new(
-        "installation".into(),
-        "session".into(),
-        "child".into(),
-        "window".into(),
-    );
+    let mut metadata = CodexResponsesMetadata {
+        session_id: "session".into(),
+        thread_id: "child".into(),
+        ..Default::default()
+    };
     metadata.turn_id = Some("turn".into());
     metadata.parent_thread_id = Some(codex_protocol::ThreadId::new());
-    metadata
-        .extra
-        .insert("secret".into(), "PRIVATE_SENTINEL".into());
-    metadata.agent_name = Some("PRIVATE_SENTINEL".into());
     let mut attempt = RequestAttempt::new(emitter.clone(), &metadata, "requested-model");
     attempt.set_request_id(Some("upstream-request"));
     attempt.observe(&ResponseEvent::ServerModel("executed-model".into()));
@@ -110,12 +105,11 @@ fn sushi_telemetry_preserves_unknown_details_and_rejects_invalid_identifiers() -
 fn sushi_telemetry_local_transport_does_not_infer_model_or_completion() -> anyhow::Result<()> {
     let home = tempfile::tempdir()?;
     let (emitter, worker) = writer::open(home.path())?;
-    let metadata = CodexResponsesMetadata::new(
-        "installation".into(),
-        "session".into(),
-        "child".into(),
-        "window".into(),
-    );
+    let metadata = CodexResponsesMetadata {
+        session_id: "session".into(),
+        thread_id: "child".into(),
+        ..Default::default()
+    };
     let mut attempt = RequestAttempt::new(emitter.clone(), &metadata, "preferred-model");
     let instance = Uuid::new_v4().to_string();
     attempt.set_cli_transport(&instance, "2.1.263");

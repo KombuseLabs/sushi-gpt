@@ -1,8 +1,8 @@
 use super::Record;
 use super::identifier;
 use super::writer;
-use crate::responses_metadata::CodexResponsesMetadata;
 use codex_api::ResponseEvent;
+use codex_extension_api::RequestMetadata as CodexResponsesMetadata;
 use codex_protocol::protocol::TokenUsage;
 use serde::Serialize;
 use uuid::Uuid;
@@ -66,13 +66,13 @@ impl From<&TokenUsage> for Usage {
     }
 }
 
-pub(crate) struct RequestAttempt {
+pub struct RequestAttempt {
     emitter: writer::Emitter,
     record: Option<UsageRecord>,
 }
 
 impl RequestAttempt {
-    pub(crate) fn start(metadata: &CodexResponsesMetadata, model: &str) -> Option<Self> {
+    pub fn start(metadata: &CodexResponsesMetadata, model: &str) -> Option<Self> {
         Self::new(writer::emitter()?.clone(), metadata, model).into()
     }
 
@@ -101,13 +101,13 @@ impl RequestAttempt {
         }
     }
 
-    pub(crate) fn set_request_id(&mut self, request_id: Option<&str>) {
+    pub fn set_request_id(&mut self, request_id: Option<&str>) {
         if let Some(record) = &mut self.record {
             record.request_id = request_id.and_then(identifier);
         }
     }
 
-    pub(crate) fn set_cli_transport(&mut self, instance: &str, version: &str) {
+    pub fn set_cli_transport(&mut self, instance: &str, version: &str) {
         if let Some(record) = &mut self.record {
             record.transport = Some("claude_cli");
             record.transport_instance_id = identifier(instance);
@@ -115,7 +115,7 @@ impl RequestAttempt {
         }
     }
 
-    pub(crate) fn observe(&mut self, event: &ResponseEvent) {
+    pub fn observe(&mut self, event: &ResponseEvent) {
         let Some(record) = &mut self.record else {
             return;
         };

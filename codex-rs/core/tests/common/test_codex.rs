@@ -32,7 +32,6 @@ use codex_exec_server::RemoveOptions;
 use codex_extension_api::ExtensionRegistry;
 use codex_extension_api::LoadInstructionsFuture;
 use codex_extension_api::UserInstructionsProvider;
-use codex_extension_api::empty_extension_registry;
 use codex_features::Feature;
 use codex_home::CodexHomeUserInstructionsProvider;
 use codex_login::CodexAuth;
@@ -1415,7 +1414,13 @@ pub fn test_codex() -> TestCodexBuilder {
         cloud_config_bundle: None,
         user_shell_override: None,
         exec_server_url: None,
-        extensions: empty_extension_registry(),
+        extensions: {
+            let mut builder = codex_extension_api::ExtensionRegistryBuilder::new();
+            codex_sushi_routing::install(&mut builder);
+            codex_sushi_claude_transport::install(&mut builder);
+            codex_sushi_diagnostics::install(&mut builder);
+            Arc::new(builder.build())
+        },
         user_instructions_provider: None,
         supports_openai_form_elicitation: false,
         external_time_provider: None,

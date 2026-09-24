@@ -5,7 +5,6 @@
 
 #[path = "model_routing/mod.rs"]
 mod model_routing;
-pub(crate) use model_routing::telemetry;
 
 use crate::agent::role::DEFAULT_ROLE_NAME;
 use crate::agent::role::apply_role_to_config;
@@ -49,7 +48,7 @@ pub(crate) struct SpawnConfigOptions<'a> {
 }
 
 pub(crate) struct PreparedSpawnConfig {
-    pub(crate) routing: Option<telemetry::Decision>,
+    pub(crate) routing: Option<Box<dyn codex_extension_api::RoutingObserver>>,
     pub(crate) config: Config,
     pub(crate) role_name: Option<String>,
 }
@@ -66,8 +65,8 @@ pub(crate) async fn prepare_agent_spawn_config(
     if options.version == SpawnConfigVersion::V1 && options.full_history_fork {
         reject_full_fork_agent_type_override(options.role_name)?;
     }
-    let routing = model_routing::select(session, step_context, &config, &options).await;
-    routing.apply_provider(&mut config)?;
+    let routing = model_routing::select(session, step_context, &config, &options).await?;
+    routing.apply_provider(&mut config, &session.services.extensions)?;
     apply_requested_spawn_agent_model_overrides(
         session,
         step_context,
@@ -116,7 +115,7 @@ pub(crate) async fn prepare_agent_spawn_config(
     routing.validate_selection(&config)?;
     routing.log_resolved(&config);
     Ok(PreparedSpawnConfig {
-        routing: routing.decision(session, step_context, options.model, &config),
+        routing: routing.decision(&config),
         config,
         role_name,
     })

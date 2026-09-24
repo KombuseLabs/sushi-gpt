@@ -1,7 +1,6 @@
 //! Schema-heavy configuration TOML types used by Codex.
 
-#[path = "agent_model_routing.rs"]
-pub mod agent_model_routing;
+pub use codex_sushi_routing_policy as agent_model_routing;
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;

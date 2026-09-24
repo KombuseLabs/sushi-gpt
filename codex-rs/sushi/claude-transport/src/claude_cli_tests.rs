@@ -32,10 +32,7 @@ async fn exercise(mode: &str) -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     let directory = tempfile::tempdir()?;
     let executable = directory.path().join(format!("{mode}.py"));
-    std::fs::write(
-        &executable,
-        include_str!("../tests/fixtures/claude_cli/peer.py"),
-    )?;
+    std::fs::write(&executable, include_str!("../tests/fixtures/peer.py"))?;
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))?;
     let provider = ModelProviderInfo {
         wire_api: codex_model_provider_info::WireApi::ClaudeCli,
@@ -60,12 +57,11 @@ async fn exercise(mode: &str) -> anyhow::Result<()> {
         ..Default::default()
     };
     let transport = Transport::default();
-    let mut metadata = CodexResponsesMetadata::new(
-        "install".into(),
-        "session".into(),
-        "child".into(),
-        "window".into(),
-    );
+    let mut metadata = CodexResponsesMetadata {
+        session_id: "session".into(),
+        thread_id: "child".into(),
+        ..Default::default()
+    };
     metadata.turn_id = Some("turn".into());
     let turn = CancellationToken::new();
     let mut call_count = 0;

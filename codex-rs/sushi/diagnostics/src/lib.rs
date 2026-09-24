@@ -3,15 +3,15 @@ mod classifier;
 mod request;
 mod writer;
 
-pub(super) use classifier::ClassifierAttempt;
+pub use classifier::ClassifierAttempt;
 use codex_protocol::ThreadId;
-pub(crate) use request::RequestAttempt;
+use request::RequestAttempt;
 use serde::Serialize;
 use uuid::Uuid;
 
 #[derive(Clone, Copy, Default, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum Reason {
+pub enum Reason {
     #[default]
     Native,
     Explicit,
@@ -59,7 +59,7 @@ enum Record {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct Decision {
+pub struct Decision {
     decision_id: Uuid,
     parent_thread_id: ThreadId,
     parent_turn_id: Option<String>,
@@ -73,7 +73,7 @@ pub(crate) struct Decision {
 }
 
 impl Decision {
-    pub(super) fn new(
+    pub fn new(
         parent_thread_id: ThreadId,
         parent_turn_id: &str,
         requested_model: Option<&str>,
@@ -108,7 +108,7 @@ impl Decision {
         })
     }
 
-    pub(crate) fn record(mut self, call_id: &str, child_thread_id: Option<ThreadId>) {
+    pub fn record(mut self, call_id: &str, child_thread_id: Option<ThreadId>) {
         self.call_id = identifier(call_id);
         self.child_thread_id = child_thread_id;
         if let Some(emitter) = writer::emitter() {
@@ -125,4 +125,39 @@ fn identifier(value: &str) -> Option<String> {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"-_.:/@".contains(&b)))
     .then(|| value.to_owned())
+}
+
+#[derive(Debug)]
+struct Observer;
+impl codex_extension_api::ModelRequestObserver for Observer {
+    fn start(
+        &self,
+        metadata: &codex_extension_api::RequestMetadata,
+        model: &str,
+    ) -> Option<Box<dyn codex_extension_api::ModelRequestAttempt>> {
+        RequestAttempt::start(metadata, model).map(|attempt| Box::new(attempt) as _)
+    }
+}
+impl codex_extension_api::ModelRequestAttempt for RequestAttempt {
+    fn set_request_id(&mut self, id: Option<&str>) {
+        self.set_request_id(id);
+    }
+    fn set_cli_transport(&mut self, instance: &str, version: &str) {
+        self.set_cli_transport(instance, version);
+    }
+    fn observe(&mut self, event: &codex_api::ResponseEvent) {
+        self.observe(event);
+    }
+}
+pub fn install<C: Sync>(registry: &mut codex_extension_api::ExtensionRegistryBuilder<C>) {
+    registry.model_request_observer(std::sync::Arc::new(Observer));
+}
+
+impl codex_extension_api::RoutingObserver for Decision {
+    fn resolved(&mut self, model: Option<&str>) {
+        self.selected_model = model.and_then(identifier);
+    }
+    fn record(self: Box<Self>, call_id: &str, child: Option<ThreadId>) {
+        (*self).record(call_id, child);
+    }
 }

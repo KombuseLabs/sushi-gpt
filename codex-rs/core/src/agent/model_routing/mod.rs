@@ -1,37 +1,37 @@
-//! Optional routing policy. Native child preparation retains validation and lifecycle ownership.
-
-mod control;
-mod jev;
-pub(crate) mod telemetry;
-mod transport;
-use telemetry::Reason;
-
+//! Adapts native child state to the registered routing policy; retains native validation.
 use super::SpawnConfigOptions;
 use super::apply_requested_spawn_agent_model_overrides;
+use super::model_supports_multi_agent_backend;
 use crate::agent::role::DEFAULT_ROLE_NAME;
 use crate::config::Config;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
-use codex_protocol::openai_models::ReasoningEffort;
-use control::Mode;
+use codex_config::config_toml::agent_model_routing::JevRouting;
+use codex_config::config_toml::agent_model_routing::JevRoutingClass;
+use codex_extension_api::ExtensionFuture;
+use codex_extension_api::RoutingHost;
+use codex_extension_api::RoutingRequest;
+use codex_extension_api::RoutingSelection;
+use codex_model_provider_info::WireApi;
+use codex_models_manager::manager::RefreshStrategy;
 
-/// The backend owns the tool definitions under this namespace and rejects any request whose
-/// `spawn_agent`/`send_message`/`followup_task` schema differs from its own (HTTP 400). The
-/// plaintext transport changes that schema, so it can only be exposed under another name.
+/// The backend owns tool definitions under this namespace and rejects changed schemas.
+/// Plaintext agent messages therefore require a separate configured namespace.
 pub(crate) const RESERVED_AGENT_TOOL_NAMESPACE: &str =
     crate::config::DEFAULT_MULTI_AGENT_V2_TOOL_NAMESPACE;
-
-#[derive(Default)]
-pub(super) struct Selection {
-    pub(super) model_provider: Option<String>,
-    pub(super) model: Option<String>,
-    pub(super) reasoning_effort: Option<ReasoningEffort>,
-    source: Option<&'static str>,
-    reason: Reason,
+pub(super) struct Selection(RoutingSelection);
+impl std::ops::Deref for Selection {
+    type Target = RoutingSelection;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
-
 impl Selection {
-    pub(super) fn apply_provider(&self, config: &mut Config) -> Result<(), String> {
+    pub(super) fn apply_provider(
+        &self,
+        config: &mut Config,
+        extensions: &codex_extension_api::ExtensionRegistry<Config>,
+    ) -> Result<(), String> {
         let Some(id) = self
             .model_provider
             .as_deref()
@@ -80,7 +80,12 @@ impl Selection {
             return Err("The routed provider requires a nonempty credential in its configured env_key before child startup.".to_string());
         }
         if provider.wire_api == codex_model_provider_info::WireApi::ClaudeCli {
-            crate::claude_cli::validate_provider(provider)?;
+            extensions
+                .model_transport()
+                .ok_or(
+                    "Local model transport is configured but no transport extension is registered.",
+                )?
+                .validate(provider)?;
         }
         config.model_provider = provider.clone();
         config.model_provider_id = id.to_string();
@@ -121,20 +126,13 @@ impl Selection {
         Ok(())
     }
     pub(super) fn decision(
-        &self,
-        session: &Session,
-        step: &StepContext,
-        requested: Option<&str>,
+        mut self,
         config: &Config,
-    ) -> Option<telemetry::Decision> {
-        telemetry::Decision::new(
-            session.thread_id,
-            &step.turn.sub_id,
-            requested,
-            self.model.as_deref(),
-            config.model.as_deref(),
-            self.reason,
-        )
+    ) -> Option<Box<dyn codex_extension_api::RoutingObserver>> {
+        if let Some(observer) = &mut self.0.observer {
+            observer.resolved(config.model.as_deref());
+        }
+        self.0.observer
     }
 
     pub(super) fn log_resolved(&self, config: &Config) {
@@ -144,151 +142,131 @@ impl Selection {
     }
 }
 
-pub(super) async fn select(
-    session: &Session,
-    step: &StepContext,
-    config: &Config,
-    options: &SpawnConfigOptions<'_>,
-) -> Selection {
-    let mut attempt = telemetry::ClassifierAttempt::new(session.thread_id, &step.turn.sub_id);
-    let selection = select_inner(session, step, config, options, &mut attempt).await;
-    attempt.finish(selection.reason);
-    selection
+struct Host<'a> {
+    session: &'a Session,
+    step: &'a StepContext,
+    config: &'a Config,
+    options: &'a SpawnConfigOptions<'a>,
 }
-
-async fn select_inner(
-    session: &Session,
-    step: &StepContext,
-    config: &Config,
-    options: &SpawnConfigOptions<'_>,
-    attempt: &mut telemetry::ClassifierAttempt,
-) -> Selection {
-    let Some(routing) = step
-        .turn
-        .config
-        .agent_model_routing
-        .as_ref()
-        .filter(|r| r.enabled)
-    else {
-        return Selection {
-            reason: if step.turn.config.agent_model_routing.is_some() {
-                Reason::RoutingOff
-            } else {
-                Reason::Native
-            },
-            ..Selection::default()
-        };
-    };
-    // One snapshot per decision, shared through CODEX_HOME; never modifies existing children.
-    let mut reason = Reason::NoRule;
-    let mode = match control::read(config.codex_home.as_path()).await {
-        Ok(mode) => mode,
-        Err(error) => {
-            tracing::warn!(target: "agent_model_routing", reason = ?error.kind(), "invalid routing control; using native defaults");
-            reason = Reason::ControlInvalid;
-            Mode::Off
-        }
-    };
-    let mut selection = Selection {
-        source: Some("default"),
-        reason,
-        ..Selection::default()
-    };
-    if options.model.is_some() {
-        selection.source = Some("explicit");
-        selection.reason = Reason::Explicit;
-        return selection;
-    }
-    if options.full_history_fork {
-        selection.source = Some("full_history");
-        selection.reason = Reason::FullHistory;
-        return selection;
-    }
-    if mode == Mode::Off {
-        selection.source = Some("disabled");
-        if !matches!(selection.reason, Reason::ControlInvalid) {
-            selection.reason = Reason::RoutingOff;
-        }
-        return selection;
-    }
-    let role = options.role_name.unwrap_or(DEFAULT_ROLE_NAME);
-    if let Some(route) = routing.select(role, options.task) {
-        return Selection {
-            model_provider: route.model_provider.clone(),
-            model: Some(route.model.clone()),
-            reasoning_effort: route.reasoning_effort.clone(),
-            source: Some("rule"),
-            reason: Reason::RuleMatched,
-        };
-    }
-    if mode == Mode::RulesOnly {
-        selection.reason = Reason::RulesOnly;
-        return selection;
-    }
-    let Some(settings) = routing.jev.as_ref().filter(|jev| jev.enabled) else {
-        selection.reason = Reason::JevDisabled;
-        return selection;
-    };
-    match jev::select(session, step, settings, role, options.task, attempt).await {
-        Ok(class) => {
-            attempt.recommended(&class.model);
-            if class.model_provider.is_some() {
-                selection.model = Some(class.model.clone());
-                selection.model_provider = class.model_provider.clone();
-                selection.reasoning_effort = class.reasoning_effort.clone();
-                selection.source = Some("jev");
-                selection.reason = Reason::JevSelected;
-                return selection;
+impl RoutingHost for Host<'_> {
+    fn candidates_available<'a>(&'a self, settings: &'a JevRouting) -> ExtensionFuture<'a, bool> {
+        Box::pin(async move {
+            let factory = self.step.turn.config.http_client_factory();
+            if settings.classes.values().any(|class| {
+                class.model_provider.as_ref().is_some_and(|id| {
+                    self.step
+                        .turn
+                        .config
+                        .model_providers
+                        .get(id)
+                        .is_none_or(|provider| {
+                            let unsupported_cross_provider = match provider.wire_api {
+                                WireApi::OpenResponses => provider.env_key.is_none(),
+                                WireApi::ClaudeCli => self
+                                    .session
+                                    .services
+                                    .extensions
+                                    .model_transport()
+                                    .is_none_or(|factory| factory.validate(provider).is_err()),
+                                WireApi::Responses => true,
+                            };
+                            (provider.env_key.is_some() && provider.api_key().is_err())
+                                || (id != &self.step.turn.config.model_provider_id
+                                    && (unsupported_cross_provider
+                                        || self.step.turn.config.model_catalog.is_none()
+                                        || !self
+                                            .step
+                                            .turn
+                                            .config
+                                            .agent_model_routing
+                                            .as_ref()
+                                            .is_some_and(|r| r.plaintext_messages)))
+                        })
+                })
+            }) {
+                return false;
             }
-            // Only classifier candidate failures fall back. Native caller validation still
-            // propagates errors for explicit models, fixed rules, defaults, and roles.
-            let mut candidate = config.clone();
-            if apply_requested_spawn_agent_model_overrides(
-                session,
-                step,
+            let available = self
+                .session
+                .services
+                .models_manager
+                .list_models(RefreshStrategy::Offline, factory.clone())
+                .await;
+            if settings.classes.values().any(|class| {
+                !available.iter().any(|model| {
+                    model.model == class.model
+                        && model_supports_multi_agent_backend(
+                            model,
+                            self.step.turn.multi_agent_version,
+                        )
+                })
+            }) {
+                return false;
+            }
+            true
+        })
+    }
+    fn validate_candidate<'a>(&'a self, class: &'a JevRoutingClass) -> ExtensionFuture<'a, bool> {
+        Box::pin(async move {
+            let mut candidate = self.config.clone();
+            apply_requested_spawn_agent_model_overrides(
+                self.session,
+                self.step,
                 &mut candidate,
                 Some(&class.model),
-                options
+                self.options
                     .reasoning_effort
                     .clone()
                     .or_else(|| class.reasoning_effort.clone()),
             )
             .await
             .is_ok()
-            {
-                selection.model = Some(class.model.clone());
-                selection.model_provider = class.model_provider.clone();
-                selection.reasoning_effort = class.reasoning_effort.clone();
-                selection.source = Some("jev");
-                selection.reason = Reason::JevSelected;
-            } else {
-                selection.reason = Reason::InvalidTargetSettings;
-                tracing::info!(target: "agent_model_routing", reason = "invalid_target_settings", "Jev routing fell back to native defaults");
-            }
-        }
-        Err(jev::JevRouteFallback::Classifier(reason)) => {
-            if let transport::JevFallback::Http(status) = reason {
-                attempt.http_status(status);
-            }
-            selection.reason = match reason {
-                transport::JevFallback::MissingKey => Reason::MissingKey,
-                transport::JevFallback::Transport => Reason::Transport,
-                transport::JevFallback::Timeout => Reason::Timeout,
-                transport::JevFallback::Http(_) => Reason::Http,
-                transport::JevFallback::OversizedResponse => Reason::OversizedResponse,
-                transport::JevFallback::InvalidResponse => Reason::InvalidResponse,
-                transport::JevFallback::Uncertain => Reason::Uncertain,
-            };
-            tracing::info!(target: "agent_model_routing", ?reason, "Jev routing fell back to native defaults");
-        }
-        Err(reason @ jev::JevRouteFallback::UnsupportedInput) => {
-            selection.reason = Reason::UnsupportedInput;
-            tracing::info!(target: "agent_model_routing", ?reason, "Jev routing fell back to native defaults");
-        }
-        Err(reason @ jev::JevRouteFallback::UnavailableModel) => {
-            selection.reason = Reason::UnavailableModel;
-            tracing::info!(target: "agent_model_routing", ?reason, "Jev routing fell back to native defaults");
-        }
+        })
     }
-    selection
+}
+
+pub(super) async fn select(
+    session: &Session,
+    step: &StepContext,
+    config: &Config,
+    options: &SpawnConfigOptions<'_>,
+) -> Result<Selection, String> {
+    let Some(router) = session.services.extensions.agent_routing() else {
+        if step
+            .turn
+            .config
+            .agent_model_routing
+            .as_ref()
+            .is_some_and(|r| r.enabled)
+        {
+            return Err(
+                "Agent model routing is configured but no routing extension is registered.".into(),
+            );
+        }
+        return Ok(Selection(RoutingSelection::default()));
+    };
+    let host = Host {
+        session,
+        step,
+        config,
+        options,
+    };
+    Ok(Selection(
+        router
+            .select(
+                RoutingRequest {
+                    settings: step.turn.config.agent_model_routing.as_ref(),
+                    codex_home: config.codex_home.as_path(),
+                    role: options.role_name.unwrap_or(DEFAULT_ROLE_NAME),
+                    task: options.task,
+                    explicit_model: options.model,
+                    full_history: options.full_history_fork,
+                    thread_id: session.thread_id,
+                    turn_id: &step.turn.sub_id,
+                    http_client: step.turn.config.http_client_factory(),
+                },
+                &host,
+            )
+            .await,
+    ))
 }

@@ -1,0 +1,12 @@
+load("//:defs.bzl", "codex_rust_crate")
+
+exports_files(
+    ["tests/fixtures/peer.py"],
+    visibility = ["//visibility:public"],
+)
+
+codex_rust_crate(
+    name = "claude-transport",
+    compile_data = glob(["tests/fixtures/**"]),
+    crate_name = "codex_sushi_claude_transport",
+)

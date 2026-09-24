@@ -8,6 +8,9 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+codex-sushi-routing = { workspace = true }
+codex-sushi-claude-transport = { workspace = true }
+codex-sushi-diagnostics = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

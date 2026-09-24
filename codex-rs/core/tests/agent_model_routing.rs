@@ -55,6 +55,8 @@ enum Backend {
 enum RoutingCase {
     Match,
     NoConfiguration,
+    Unregistered,
+    UnregisteredNoConfiguration,
     ExplicitEffort,
     RoleModel,
     PartialHistory,
@@ -85,6 +87,10 @@ fn body_contains(request: &wiremock::Request, needle: &str) -> bool {
         .is_some_and(|body| body.contains(needle))
 }
 
+#[test_case(Backend::V1, RoutingCase::Unregistered; "v1 configured routing requires registration")]
+#[test_case(Backend::V2, RoutingCase::Unregistered; "v2 configured routing requires registration")]
+#[test_case(Backend::V1, RoutingCase::UnregisteredNoConfiguration; "v1 unregistered native defaults")]
+#[test_case(Backend::V2, RoutingCase::UnregisteredNoConfiguration; "v2 unregistered native defaults")]
 #[test_case(Backend::V1, RoutingCase::NoConfiguration; "v1 preserves behavior without configuration")]
 #[test_case(Backend::V2, RoutingCase::NoConfiguration; "v2 preserves behavior without configuration")]
 #[test_case(Backend::V1, RoutingCase::ExplicitEffort; "v1 preserves an explicit reasoning effort")]
@@ -222,7 +228,10 @@ async fn run_routing(backend: Backend, case: RoutingCase, jev: Option<JevRouting
                     .disable(Feature::MultiAgentV2)
                     .expect("disable native v2");
             }
-            if case == RoutingCase::NoConfiguration {
+            if matches!(
+                case,
+                RoutingCase::NoConfiguration | RoutingCase::UnregisteredNoConfiguration
+            ) {
                 return;
             }
             if case == RoutingCase::RoleModel {
@@ -304,6 +313,12 @@ async fn run_routing(backend: Backend, case: RoutingCase, jev: Option<JevRouting
             }
         });
     }
+    if matches!(
+        case,
+        RoutingCase::Unregistered | RoutingCase::UnregisteredNoConfiguration
+    ) {
+        builder = builder.with_extensions(codex_extension_api::empty_extension_registry());
+    }
     let test = builder.build_with_auto_env(&server).await?;
     let mut created = test.thread_manager.subscribe_thread_created();
     test.submit_turn(ROOT).await?;
@@ -312,11 +327,19 @@ async fn run_routing(backend: Backend, case: RoutingCase, jev: Option<JevRouting
     for request in root_requests {
         assert_eq!(request.body_json()["model"], json!(PARENT_MODEL));
     }
-    if case == RoutingCase::UnavailableModel {
+    if matches!(
+        case,
+        RoutingCase::UnavailableModel | RoutingCase::Unregistered
+    ) {
+        let expected = if case == RoutingCase::Unregistered {
+            "no routing extension is registered"
+        } else {
+            "Unknown model"
+        };
         assert!(
             parent_followup
                 .function_call_output_text(CALL)
-                .is_some_and(|output| output.contains("Unknown model"))
+                .is_some_and(|output| output.contains(expected))
         );
         assert!(created.try_recv().is_err());
         assert!(child_requests.requests().is_empty());

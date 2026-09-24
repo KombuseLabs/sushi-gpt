@@ -101,15 +101,20 @@ fn native_hosted_child_uses_inherited_dynamic_tool_and_fails_closed() -> Result<
 }
 
 async fn exercise(scenario: &str) -> Result<()> {
-    let is_local_cli = matches!(scenario, "local_cli" | "local_cli_jev");
+    let is_local_cli = matches!(
+        scenario,
+        "local_cli" | "local_cli_jev" | "missing_transport" | "local_cli_cancel"
+    );
     let cli_directory = tempfile::tempdir()?;
     let cli_executable = cli_directory.path().join("success.py");
+    #[cfg(unix)]
+    let cli_pid = cli_executable.with_extension("py.pid");
     #[cfg(unix)]
     if is_local_cli {
         use std::os::unix::fs::PermissionsExt;
         std::fs::write(
             &cli_executable,
-            include_str!("../fixtures/claude_cli/peer.py"),
+            include_str!("../../../sushi/claude-transport/tests/fixtures/peer.py"),
         )?;
         std::fs::set_permissions(&cli_executable, std::fs::Permissions::from_mode(0o700))?;
     }
@@ -174,7 +179,7 @@ async fn exercise(scenario: &str) -> Result<()> {
     let missing = scenario == "missing_credential";
     let jev_endpoint = format!("{}/v1/systemone", root_server.uri());
     let use_jev = matches!(scenario, "jev" | "jev_outage" | "local_cli_jev");
-    let mut test = test_codex()
+    let mut builder = test_codex()
         .with_model(PARENT_MODEL)
         .with_model_info_override(PARENT_MODEL, |model| {
             model.multi_agent_version = Some(MultiAgentVersion::V2);
@@ -276,9 +281,13 @@ async fn exercise(scenario: &str) -> Result<()> {
             config
                 .model_providers
                 .insert("synthetic-hosted".into(), provider);
-        })
-        .build_with_auto_env(&root_server)
-        .await?;
+        });
+    if scenario == "missing_transport" {
+        let mut extensions = codex_extension_api::ExtensionRegistryBuilder::new();
+        codex_sushi_routing::install(&mut extensions);
+        builder = builder.with_extensions(std::sync::Arc::new(extensions.build()));
+    }
+    let mut test = builder.build_with_auto_env(&root_server).await?;
     let root = test.thread_manager.start_thread(StartThreadOptions {
         dynamic_tools:vec![DynamicToolSpec::Function(DynamicToolFunctionSpec { name:"document_fixture".into(), description:"Synthetic document callback".into(), input_schema:json!({"type":"object","properties":{"title":{"type":"string"}},"required":["title"]}), defer_loading:false })],
         environments:Some(vec![test.executor_environment().selection().clone()]),
@@ -298,9 +307,19 @@ async fn exercise(scenario: &str) -> Result<()> {
     // the backend never encrypts, so the message is delivered as plaintext.
     if !matches!(
         scenario,
-        "success" | "jev" | "local_cli" | "local_cli_jev" | "unspecified"
+        "success" | "jev" | "local_cli" | "local_cli_jev" | "unspecified" | "local_cli_cancel"
     ) {
         assert!(created.try_recv().is_err(), "scenario {scenario}");
+        if scenario == "missing_transport" {
+            assert!(
+                root_server
+                    .received_requests()
+                    .await
+                    .expect("recorded native requests")
+                    .iter()
+                    .any(|request| body_contains(request, "no transport extension is registered"))
+            );
+        }
         assert!(
             child_server
                 .received_requests()
@@ -326,6 +345,32 @@ async fn exercise(scenario: &str) -> Result<()> {
         call.arguments,
         json!({"title":if is_local_cli {"fixture-0"} else {"fixture"}})
     );
+    #[cfg(unix)]
+    if scenario == "local_cli_cancel" {
+        child.submit(Op::Interrupt).await?;
+        let pid: i32 = std::fs::read_to_string(cli_pid)?.parse()?;
+        timeout(Duration::from_secs(20), async {
+            loop {
+                // Signal zero observes only the synthetic peer; native cancellation must reap it.
+                let gone = unsafe { libc::kill(pid, 0) } == -1
+                    && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH);
+                if gone && child.agent_status().await == AgentStatus::Interrupted {
+                    break;
+                }
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await?;
+        assert_eq!(child.agent_status().await, AgentStatus::Interrupted);
+        assert!(
+            child_server
+                .received_requests()
+                .await
+                .expect("recorded mock requests")
+                .is_empty()
+        );
+        return Ok(());
+    }
     child
         .submit(Op::DynamicToolResponse {
             id: call.call_id,
@@ -529,4 +574,16 @@ async fn jev_can_select_local_claude_with_inherited_host_callback() -> Result<()
         return Ok(());
     }
     exercise("local_cli_jev").await
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn native_local_transport_requires_registered_factory() -> Result<()> {
+    exercise("missing_transport").await
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn native_interrupt_reaps_local_transport_while_host_tool_is_pending() -> Result<()> {
+    exercise("local_cli_cancel").await
 }

@@ -206,13 +206,26 @@ A live TypeSafe call requires a locally supplied key and remains a separate chec
 
 ## Native integration and runtime switch
 
-Routing policy, runtime control, Jev transport and telemetry live under
-`codex-rs/core/src/agent/model_routing/`. The existing child-configuration boundary
-applies the selection before native validation, role settings and child startup.
-Configuration loading, provider/client transport, tool schemas and plaintext
-message handling also connect to existing core paths. These connections are
-needed to select a provider and return native tool results through its transport;
-there is no separate worker scheduler.
+Routing is statically installed through the native `ExtensionRegistry`. The
+app-server and thread-manager sample register the same implementations:
+
+- `codex-rs/sushi/routing-policy` owns config DTOs, validation and rule matching.
+  `codex-config` re-exports the existing configuration path.
+- `codex-rs/sushi/routing` owns routing decisions, runtime control and the bounded
+  classifier request. A read-only host capability validates native candidates.
+- `codex-rs/sushi/claude-transport` owns the local process and wire protocol behind
+  a duplex sampling contract. Core alone executes tools and controls child/turn
+  lifetimes; process cleanup observes native cancellation and stream closure.
+- `codex-rs/sushi/diagnostics` owns the opt-in bounded JSONL writer and observers.
+  OpenResponses adaptation remains in `codex-api`.
+
+The existing child-configuration boundary applies proposals before native
+validation and role settings, then checks strict candidates after resolution.
+Core projects prompt and metadata snapshots without exposing private sessions.
+Configured routing or local transport without its registered implementation
+fails explicitly; hosts with no routing configuration retain native defaults.
+Direct `ThreadManager` embedders can register the three runtime crates with
+`install(&mut registry)`. No dynamic loader or separate worker scheduler is used.
 
 Routing integration tests start at `codex-rs/core/tests/agent_model_routing.rs`,
 with hosted, runtime and telemetry modules alongside it. Cargo discovers the
