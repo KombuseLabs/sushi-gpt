@@ -841,6 +841,7 @@ mod tests {
         }
         drop(tx_event);
         ResponseStream {
+            tool_result_tx: None,
             rx_event,
             consumer_dropped: CancellationToken::new(),
         }

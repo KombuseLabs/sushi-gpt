@@ -10,6 +10,7 @@ use crate::agent::types::SpawnAgentForkMode;
 use crate::agent::types::SpawnAgentOptions;
 use crate::tools::handlers::multi_agents_spec::SpawnAgentToolOptions;
 use crate::tools::handlers::multi_agents_spec::create_spawn_agent_tool_v1;
+use codex_config::config_toml::agent_model_routing::AgentModelRoutingTask;
 use codex_tools::ToolSpec;
 
 #[derive(Default)]
@@ -97,6 +98,7 @@ async fn handle_spawn_agent(
         step_context.as_ref(),
         SpawnConfigOptions {
             version: SpawnConfigVersion::V1,
+            task: AgentModelRoutingTask::V1Message(&prompt),
             full_history_fork: args.fork_context,
             role_name,
             model: args.model.as_deref(),
@@ -138,6 +140,9 @@ async fn handle_spawn_agent(
         ),
         Err(_) => (None, None, AgentStatus::NotFound),
     };
+    if let Some(routing) = prepared.routing {
+        routing.record(&call_id, new_thread_id);
+    }
     let agent_snapshot = match new_thread_id {
         Some(thread_id) => {
             session

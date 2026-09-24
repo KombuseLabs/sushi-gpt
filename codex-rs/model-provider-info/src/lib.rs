@@ -27,6 +27,7 @@ use std::fmt;
 use std::num::NonZeroU64;
 use std::path::Component;
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::PoisonError;
 use std::sync::RwLock;
 use std::time::Duration;
@@ -103,12 +104,19 @@ pub enum WireApi {
     /// The Responses API exposed by OpenAI at `/v1/responses`.
     #[default]
     Responses,
+    /// Stateless standard Responses with local native tool/message adaptation.
+    OpenResponses,
+    /// A child-owned local Claude Code process using the native tool bridge.
+    #[serde(rename = "claude_cli")]
+    ClaudeCli,
 }
 
 impl fmt::Display for WireApi {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let value = match self {
             Self::Responses => "responses",
+            Self::OpenResponses => "openresponses",
+            Self::ClaudeCli => "claude_cli",
         };
         f.write_str(value)
     }
@@ -122,8 +130,13 @@ impl<'de> Deserialize<'de> for WireApi {
         let value = String::deserialize(deserializer)?;
         match value.as_str() {
             "responses" => Ok(Self::Responses),
+            "openresponses" => Ok(Self::OpenResponses),
+            "claude_cli" => Ok(Self::ClaudeCli),
             "chat" => Err(serde::de::Error::custom(CHAT_WIRE_API_REMOVED_ERROR)),
-            _ => Err(serde::de::Error::unknown_variant(&value, &["responses"])),
+            _ => Err(serde::de::Error::unknown_variant(
+                &value,
+                &["responses", "openresponses", "claude_cli"],
+            )),
         }
     }
 }
@@ -159,6 +172,8 @@ pub struct ModelProviderInfo {
     /// Which wire protocol this provider expects.
     #[serde(default)]
     pub wire_api: WireApi,
+    /// Executable name or path for the local Claude transport, invoked without a shell.
+    pub cli_command: Option<PathBuf>,
     /// Optional query parameters to append to the base URL.
     pub query_params: Option<HashMap<String, RedactedString>>,
     /// Additional HTTP headers to include in requests to this provider where
@@ -490,6 +505,9 @@ other non-default provider fields are not supported"
 
     /// Effective maximum number of stream reconnection attempts for this provider.
     pub fn stream_max_retries(&self) -> u64 {
+        if self.wire_api == WireApi::ClaudeCli {
+            return 0;
+        }
         self.stream_max_retries
             .unwrap_or(DEFAULT_STREAM_MAX_RETRIES)
             .min(MAX_STREAM_MAX_RETRIES)
@@ -521,6 +539,7 @@ other non-default provider fields are not supported"
             gateway_oauth: None,
             aws: None,
             wire_api: WireApi::Responses,
+            cli_command: None,
             query_params: None,
             http_headers: Some(
                 [("version".to_string(), env!("CARGO_PKG_VERSION").into())]
@@ -571,6 +590,7 @@ other non-default provider fields are not supported"
                 auth_refresh: None,
             })),
             wire_api: WireApi::Responses,
+            cli_command: None,
             query_params: None,
             http_headers: Some(HashMap::from([(
                 AMAZON_BEDROCK_MANTLE_CLIENT_AGENT_HEADER.to_string(),
@@ -747,6 +767,7 @@ pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> M
         gateway_oauth: None,
         aws: None,
         wire_api,
+        cli_command: None,
         query_params: None,
         http_headers: None,
         env_http_headers: None,

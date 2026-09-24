@@ -158,7 +158,15 @@ async fn invalid_provider_rollout_budget_units_fail_without_retry() -> Result<()
         error.message,
         "Fatal error: response.completed usage.codex_rollout_budget_units must be finite and non-negative"
     );
-    assert_eq!(error.codex_error_info, Some(CodexErrorInfo::Other));
+    assert_eq!(
+        error.codex_error_info,
+        Some(CodexErrorInfo::ExecutionError {
+            stage: codex_protocol::execution_error::ExecutionErrorStage::StreamProcessing,
+            category: codex_protocol::execution_error::ExecutionErrorCategory::Fatal,
+            http_status_code: None,
+            provider_validation: None,
+        })
+    );
     wait_for_event(&test.codex, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })

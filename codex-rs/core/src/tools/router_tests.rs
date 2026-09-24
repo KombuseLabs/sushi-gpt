@@ -208,6 +208,75 @@ async fn parallel_support_does_not_match_namespaced_local_tool_names() -> anyhow
 }
 
 #[tokio::test]
+async fn plaintext_agent_calls_are_detected_under_any_namespace() -> anyhow::Result<()> {
+    for (namespace, name, encrypted, expected) in [
+        (
+            "collaboration",
+            "spawn_agent",
+            Some(Vec::new()),
+            ToolCallSource::DirectPlaintextMessage,
+        ),
+        (
+            "agent_router_agents",
+            "spawn_agent",
+            Some(Vec::new()),
+            ToolCallSource::DirectPlaintextMessage,
+        ),
+        (
+            "agent_router_agents",
+            "followup_task",
+            Some(Vec::new()),
+            ToolCallSource::DirectPlaintextMessage,
+        ),
+        (
+            "agent_router_agents",
+            "spawn_agent",
+            Some(vec!["message".to_string()]),
+            ToolCallSource::Direct,
+        ),
+        // The model omits the field for tools the backend does not own: plaintext under our namespace.
+        (
+            "agent_router_agents",
+            "spawn_agent",
+            None,
+            ToolCallSource::DirectPlaintextMessage,
+        ),
+        (
+            "agent_router_agents",
+            "send_message",
+            None,
+            ToolCallSource::DirectPlaintextMessage,
+        ),
+        ("collaboration", "spawn_agent", None, ToolCallSource::Direct),
+        (
+            "agent_router_agents",
+            "wait_agent",
+            Some(Vec::new()),
+            ToolCallSource::Direct,
+        ),
+        (
+            "agent_router_agents",
+            "wait_agent",
+            None,
+            ToolCallSource::Direct,
+        ),
+    ] {
+        let call = ToolRouter::build_tool_call(ResponseItem::FunctionCall {
+            id: None,
+            name: name.to_string(),
+            namespace: Some(namespace.to_string()),
+            arguments: "{}".to_string(),
+            encrypted_function_args: encrypted,
+            call_id: "call-plaintext".to_string(),
+            internal_chat_message_metadata_passthrough: None,
+        })?
+        .expect("function_call should produce a tool call");
+        assert_eq!(call.direct_source(), expected, "{namespace}.{name}");
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn build_tool_call_uses_namespace_for_registry_name() -> anyhow::Result<()> {
     let tool_name = "create_event".to_string();
 

@@ -160,6 +160,7 @@ fn model_provider_from_proto(
     let id = provider.id;
     let wire_api = match proto::WireApi::try_from(provider.wire_api) {
         Ok(proto::WireApi::Responses) => WireApi::Responses,
+        Ok(proto::WireApi::Openresponses) => WireApi::OpenResponses,
         Ok(proto::WireApi::Unspecified) => {
             return Err(parse_error("remote thread config omitted wire_api"));
         }
@@ -184,6 +185,7 @@ fn model_provider_from_proto(
         gateway_oauth: None,
         aws: None,
         wire_api,
+        cli_command: None,
         query_params: provider.query_params.map(redacted_string_map),
         http_headers: provider.http_headers.map(redacted_string_map),
         env_http_headers: provider.env_http_headers.map(|map| map.values),
@@ -214,6 +216,7 @@ fn model_provider_to_proto(
         gateway_oauth: _,
         aws: _,
         wire_api,
+        cli_command: _,
         query_params,
         http_headers,
         env_http_headers,
@@ -310,6 +313,9 @@ fn proto_string_map(values: HashMap<String, RedactedString>) -> proto::StringMap
 fn proto_wire_api(wire_api: WireApi) -> proto::WireApi {
     match wire_api {
         WireApi::Responses => proto::WireApi::Responses,
+        WireApi::OpenResponses => proto::WireApi::Openresponses,
+        // Test-only encoder: local executable providers are not a remote-config capability.
+        WireApi::ClaudeCli => proto::WireApi::Unspecified,
     }
 }
 
@@ -561,6 +567,7 @@ mod tests {
                 cwd: workspace_dir(),
             }),
             wire_api: WireApi::Responses,
+            cli_command: None,
             query_params: Some(HashMap::from([(
                 "api-version".to_string(),
                 "2026-04-16".into(),

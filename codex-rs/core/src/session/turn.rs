@@ -2497,7 +2497,13 @@ async fn try_run_sampling_request(
         )
         .instrument(trace_span!("stream_request"))
         .or_cancel(&cancellation_token)
-        .await??;
+        .await?
+        .map_err(|error| {
+            error.with_execution_context(
+                codex_protocol::execution_error::ExecutionErrorStage::RequestPreparation,
+                /*http_status_code*/ None,
+            )
+        })?;
     let mut in_flight: FuturesOrdered<InFlightFuture<'static>> = FuturesOrdered::new();
     let mut needs_follow_up = false;
     let mut last_agent_message: Option<String> = None;
@@ -2543,13 +2549,36 @@ async fn try_run_sampling_request(
             codex.usage.total_tokens = field::Empty,
         );
 
-        let event = match stream
-            .next()
+        let tool_result_tx = stream.tool_result_tx.clone();
+        let next_event = async {
+            loop {
+                tokio::select! {
+                    result = in_flight.next(), if tool_result_tx.is_some() && !in_flight.is_empty() => {
+                        let envelope = result.ok_or_else(|| CodexErr::Fatal("Native tool queue closed unexpectedly.".into()))??;
+                        mark_thread_memory_mode_polluted_if_external_context(
+                            sess.as_ref(), turn_context.as_ref(), &envelope.item,
+                        ).await;
+                        let item = envelope.item.clone();
+                        sess.record_annotated_conversation_items(
+                            &turn_context, &step_context.settings.model_info, vec![envelope],
+                        ).await;
+                        if let Some(sender) = &tool_result_tx {
+                            sender.send(item).await.map_err(|_| CodexErr::Fatal(
+                                "Local model transport closed before the native tool result.".into()
+                            ))?;
+                        }
+                    }
+                    event = stream.next() => return Ok::<_, CodexErr>(event),
+                }
+            }
+        };
+        let event = match next_event
             .instrument(trace_span!(parent: &handle_responses, "receiving"))
             .or_cancel(&cancellation_token)
             .await
         {
-            Ok(event) => event,
+            Ok(Ok(event)) => event,
+            Ok(Err(error)) => break Err(error),
             Err(codex_async_utils::CancelErr::Cancelled) => {
                 break Err(CodexErr::TurnAborted);
             }
@@ -3063,7 +3092,12 @@ async fn try_run_sampling_request(
         }
     }
 
-    outcome
+    outcome.map_err(|error| {
+        error.with_execution_context(
+            codex_protocol::execution_error::ExecutionErrorStage::StreamProcessing,
+            /*http_status_code*/ None,
+        )
+    })
 }
 
 pub(crate) fn get_last_assistant_message_from_turn<'a>(

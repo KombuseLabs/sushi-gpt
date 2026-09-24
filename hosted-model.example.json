@@ -1,0 +1,23 @@
+{
+  "slug": "anthropic/claude-haiku-4.5",
+  "display_name": "Hosted Claude manual test",
+  "description": "Conservative local test contract; provider access and behavior require a live test.",
+  "model_messages": {
+    "instructions_template": "Complete the assigned task using the available tools. Follow the provided instructions and native agent communication contract. Never claim a tool result that was not returned."
+  },
+  "supported_reasoning_levels": [],
+  "shell_type": "disabled",
+  "visibility": "list",
+  "supported_in_api": true,
+  "priority": 100,
+  "supports_reasoning_summary_parameter": false,
+  "support_verbosity": false,
+  "truncation_policy": {"mode": "tokens", "limit": 10000},
+  "context_window": 32768,
+  "experimental_supported_tools": [],
+  "input_modalities": ["text"],
+  "supports_search_tool": false,
+  "use_responses_lite": false,
+  "tool_mode": "direct",
+  "multi_agent_version": "v2"
+}

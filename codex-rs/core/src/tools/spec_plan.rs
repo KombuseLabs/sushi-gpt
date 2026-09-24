@@ -53,6 +53,7 @@ use crate::tools::handlers::tool_search_spec::ToolSearchSourceListing;
 use crate::tools::handlers::view_image_spec::ViewImageToolOptions;
 use crate::tools::hosted_spec::WebSearchToolOptions;
 use crate::tools::hosted_spec::create_web_search_tool;
+use crate::tools::multi_agent_tool::AgentMessageTransport;
 use crate::tools::multi_agent_tool::multi_agent_v2_handler;
 #[cfg(test)]
 use crate::tools::registry::RegisteredTool;
@@ -1242,6 +1243,16 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
     let turn_context = context.turn_context;
     if collab_tools_enabled(turn_context, context.model_info) {
         if multi_agent_v2_enabled(turn_context) {
+            let message_transport = if turn_context
+                .config
+                .agent_model_routing
+                .as_ref()
+                .is_some_and(|r| r.plaintext_messages)
+            {
+                AgentMessageTransport::DeclaredPlaintext
+            } else {
+                AgentMessageTransport::Encrypted
+            };
             let model_messages = ResolvedModelMessages::from_model(context.model_info);
             let spawn_agent_description =
                 model_messages.multi_agent_tool_description_override("spawn_agent");
@@ -1283,6 +1294,7 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                     /*description_override*/
                     None,
                     model_messages.multi_agent_tool_parameters_override("spawn_agent"),
+                    message_transport,
                 ),
                 exposure,
             );
@@ -1292,6 +1304,7 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                     tool_namespace,
                     model_messages.multi_agent_tool_description_override("send_message"),
                     model_messages.multi_agent_tool_parameters_override("send_message"),
+                    message_transport,
                 ),
                 exposure,
             );
@@ -1301,6 +1314,7 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                     tool_namespace,
                     model_messages.multi_agent_tool_description_override("followup_task"),
                     model_messages.multi_agent_tool_parameters_override("followup_task"),
+                    message_transport,
                 ),
                 exposure,
             );
@@ -1311,6 +1325,7 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                         tool_namespace,
                         model_messages.multi_agent_tool_description_override("wait_agent"),
                         model_messages.multi_agent_tool_parameters_override("wait_agent"),
+                        message_transport,
                     ),
                     exposure,
                 );
@@ -1321,6 +1336,7 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                     tool_namespace,
                     model_messages.multi_agent_tool_description_override("interrupt_agent"),
                     model_messages.multi_agent_tool_parameters_override("interrupt_agent"),
+                    message_transport,
                 ),
                 exposure,
             );
@@ -1330,6 +1346,7 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                     tool_namespace,
                     model_messages.multi_agent_tool_description_override("list_agents"),
                     model_messages.multi_agent_tool_parameters_override("list_agents"),
+                    message_transport,
                 ),
                 exposure,
             );

@@ -592,6 +592,7 @@ mod thread_processor_behavior_tests {
     async fn derive_config_from_params_uses_session_thread_config_model_provider() -> Result<()> {
         let temp_dir = TempDir::new()?;
         let session_provider = ModelProviderInfo {
+            cli_command: None,
             name: "session".to_string(),
             base_url: Some("http://127.0.0.1:8061/api/codex".to_string()),
             model_catalog_url: None,

@@ -408,6 +408,19 @@ impl ModelProvider for ConfiguredModelProvider {
     }
 
     fn capabilities(&self) -> ProviderCapabilities {
+        if matches!(
+            self.info.wire_api,
+            codex_model_provider_info::WireApi::OpenResponses
+                | codex_model_provider_info::WireApi::ClaudeCli
+        ) {
+            return ProviderCapabilities {
+                namespace_tools: true,
+                image_generation: false,
+                web_search: false,
+                external_web_access: false,
+                remote_compaction: RemoteCompactionSupport::Unsupported,
+            };
+        }
         let remote_compaction = if self.info.is_openai()
             || is_azure_responses_provider(&self.info.name, self.info.base_url.as_deref())
         {
@@ -677,6 +690,7 @@ mod tests {
 
     fn provider_for(base_url: String) -> ModelProviderInfo {
         ModelProviderInfo {
+            cli_command: None,
             name: "mock".into(),
             base_url: Some(base_url),
             model_catalog_url: None,

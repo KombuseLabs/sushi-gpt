@@ -3,12 +3,17 @@
 //! Spawn and reload share live runtime policy; role and model precedence, full-history
 //! inheritance, and validation messages remain the same for each multi-agent version.
 
+#[path = "model_routing/mod.rs"]
+mod model_routing;
+pub(crate) use model_routing::telemetry;
+
 use crate::agent::role::DEFAULT_ROLE_NAME;
 use crate::agent::role::apply_role_to_config;
 use crate::config::Config;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
 use crate::session::turn_context::TurnContext;
+use codex_config::config_toml::agent_model_routing::AgentModelRoutingTask;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::models::BaseInstructions;
@@ -36,6 +41,7 @@ pub(crate) enum SpawnConfigVersion {
 
 pub(crate) struct SpawnConfigOptions<'a> {
     pub(crate) version: SpawnConfigVersion,
+    pub(crate) task: AgentModelRoutingTask<'a>,
     pub(crate) full_history_fork: bool,
     pub(crate) role_name: Option<&'a str>,
     pub(crate) model: Option<&'a str>,
@@ -43,6 +49,7 @@ pub(crate) struct SpawnConfigOptions<'a> {
 }
 
 pub(crate) struct PreparedSpawnConfig {
+    pub(crate) routing: Option<telemetry::Decision>,
     pub(crate) config: Config,
     pub(crate) role_name: Option<String>,
 }
@@ -59,12 +66,16 @@ pub(crate) async fn prepare_agent_spawn_config(
     if options.version == SpawnConfigVersion::V1 && options.full_history_fork {
         reject_full_fork_agent_type_override(options.role_name)?;
     }
+    let routing = model_routing::select(session, step_context, &config, &options).await;
+    routing.apply_provider(&mut config)?;
     apply_requested_spawn_agent_model_overrides(
         session,
         step_context,
         &mut config,
-        options.model,
-        options.reasoning_effort,
+        options.model.or(routing.model.as_deref()),
+        options
+            .reasoning_effort
+            .or(routing.reasoning_effort.clone()),
     )
     .await?;
     if !options.full_history_fork
@@ -81,6 +92,12 @@ pub(crate) async fn prepare_agent_spawn_config(
         }
     }
     apply_spawn_agent_service_tier(session, &mut config).await?;
+    if config.model_provider_id != turn.config.model_provider_id {
+        if options.version != SpawnConfigVersion::V2 || routing.model != config.model {
+            return Err("Cross-provider routing requires V2 and cannot be combined with a role model override.".to_string());
+        }
+        config.service_tier = None;
+    }
     apply_spawn_agent_runtime_overrides(&mut config, turn)?;
 
     // Remember an applied configured default so cold reload reapplies its restrictions.
@@ -96,7 +113,13 @@ pub(crate) async fn prepare_agent_spawn_config(
             .then_some(DEFAULT_ROLE_NAME)
         })
         .map(str::to_owned);
-    Ok(PreparedSpawnConfig { config, role_name })
+    routing.validate_selection(&config)?;
+    routing.log_resolved(&config);
+    Ok(PreparedSpawnConfig {
+        routing: routing.decision(session, step_context, options.model, &config),
+        config,
+        role_name,
+    })
 }
 
 /// Builds the base config snapshot for a newly spawned sub-agent.
@@ -202,8 +225,11 @@ async fn apply_requested_spawn_agent_model_overrides(
 ) -> Result<(), String> {
     let turn = step_context.turn.as_ref();
     let requested_model = requested_model.or(turn.config.agent_default_subagent_model.as_deref());
-    let requested_reasoning_effort = requested_reasoning_effort
-        .or_else(|| turn.config.agent_default_subagent_reasoning_effort.clone());
+    let requested_reasoning_effort = requested_reasoning_effort.or_else(|| {
+        (config.model_provider_id == turn.config.model_provider_id)
+            .then(|| turn.config.agent_default_subagent_reasoning_effort.clone())
+            .flatten()
+    });
     if requested_model.is_none() && requested_reasoning_effort.is_none() {
         return Ok(());
     }

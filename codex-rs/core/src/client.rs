@@ -117,6 +117,7 @@ use tracing::trace;
 use tracing::warn;
 use uuid::Uuid;
 
+use crate::agent::child_config::telemetry::RequestAttempt as SushiRequestAttempt;
 use crate::attestation::AttestationContext;
 use crate::attestation::AttestationProvider;
 use crate::attestation::X_OAI_ATTESTATION_HEADER;
@@ -214,6 +215,7 @@ struct ModelClientState {
     disable_websockets: AtomicBool,
     agent_identity_session_fallback: AgentIdentitySessionFallback,
     cached_websocket_session: StdMutex<WebsocketSession>,
+    claude_cli: Arc<crate::claude_cli::Transport>,
 }
 
 enum ClientRouting {
@@ -296,6 +298,7 @@ pub struct ModelClientSession {
     /// appends, or continuation requests), and must not send it between different turns.
     /// An auth ownership change clears it so the new owner gets fresh routing state.
     turn_state: Arc<OnceLock<String>>,
+    claude_turn: tokio_util::sync::CancellationToken,
 }
 
 #[derive(Debug, Clone)]
@@ -535,6 +538,7 @@ impl ModelClient {
                 disable_websockets: AtomicBool::new(false),
                 agent_identity_session_fallback: AgentIdentitySessionFallback::default(),
                 cached_websocket_session: StdMutex::new(WebsocketSession::default()),
+                claude_cli: Arc::new(crate::claude_cli::Transport::default()),
             }),
             agent_identity_policy,
             prompt_cache_key_override: None,
@@ -608,6 +612,7 @@ impl ModelClient {
             client: self.clone(),
             websocket_session,
             turn_state: Arc::new(OnceLock::new()),
+            claude_turn: tokio_util::sync::CancellationToken::new(),
         }
     }
 
@@ -940,6 +945,7 @@ impl ModelClient {
                     encrypted_function_args,
                     ..
                 } = item
+                    && self.state.provider.info().wire_api != WireApi::OpenResponses
                 {
                     *encrypted_function_args = None;
                 }
@@ -1018,7 +1024,8 @@ impl ModelClient {
     ///
     /// WebSocket use is controlled by provider capability and session-scoped fallback state.
     pub fn responses_websocket_enabled(&self) -> bool {
-        if !self.state.provider.info().supports_websockets
+        if self.state.provider.info().wire_api == WireApi::OpenResponses
+            || !self.state.provider.info().supports_websockets
             || self.state.disable_websockets.load(Ordering::Relaxed)
         {
             return false;
@@ -1331,6 +1338,7 @@ impl ModelClient {
 
 impl Drop for ModelClientSession {
     fn drop(&mut self) {
+        self.claude_turn.cancel();
         let websocket_session = std::mem::take(&mut self.websocket_session);
         self.client
             .store_cached_websocket_session(websocket_session);
@@ -1712,6 +1720,12 @@ impl ModelClientSession {
                 client_setup.api_auth,
             )
             .with_telemetry(Some(request_telemetry), Some(sse_telemetry));
+            let sushi_attempt = SushiRequestAttempt::start(responses_metadata, &request.model);
+            let client = if self.client.state.provider.info().wire_api == WireApi::OpenResponses {
+                client.with_openresponses()
+            } else {
+                client
+            };
             let stream_result = client.stream_request(request, options).await;
 
             match stream_result {
@@ -1721,6 +1735,7 @@ impl ModelClientSession {
                         request_session_telemetry,
                         inference_trace_attempt,
                         Arc::clone(&self.client.state.provider),
+                        sushi_attempt,
                     );
                     return Ok(stream);
                 }
@@ -1997,6 +2012,9 @@ impl ModelClientSession {
                     ("phase", if warmup { "warmup" } else { "generation" }),
                 ],
             );
+            let sushi_attempt = (!warmup)
+                .then(|| SushiRequestAttempt::start(responses_metadata, &request.model))
+                .flatten();
             let stream_result = websocket_connection
                 .stream_request(
                     ws_request,
@@ -2026,6 +2044,7 @@ impl ModelClientSession {
                 request_session_telemetry,
                 inference_trace_attempt,
                 Arc::clone(&self.client.state.provider),
+                sushi_attempt,
             );
             self.websocket_session.last_response_rx = Some(last_request_rx);
             return Ok(WebsocketStreamOutcome::Stream(stream));
@@ -2142,7 +2161,37 @@ impl ModelClientSession {
     ) -> Result<ResponseStream> {
         let wire_api = self.client.state.provider.info().wire_api;
         match wire_api {
-            WireApi::Responses => {
+            WireApi::ClaudeCli => {
+                if effort.is_some() {
+                    return Err(CodexErr::Fatal(
+                        "Local Claude does not support native reasoning-effort overrides.".into(),
+                    ));
+                }
+                if service_tier.is_some() {
+                    return Err(CodexErr::Fatal(
+                        "Local Claude does not support native service-tier overrides.".into(),
+                    ));
+                }
+                if self.client.restored_history
+                    || !self.client.state.session_source.is_non_root_agent()
+                {
+                    return Err(CodexErr::Fatal(
+                        "Local Claude currently requires a fresh native child.".into(),
+                    ));
+                }
+                self.client
+                    .state
+                    .claude_cli
+                    .stream(
+                        self.client.state.provider.info(),
+                        prompt,
+                        &model_info.slug,
+                        responses_metadata,
+                        self.claude_turn.clone(),
+                    )
+                    .await
+            }
+            WireApi::Responses | WireApi::OpenResponses => {
                 if self.client.responses_websocket_enabled() {
                     let request_trace = current_span_w3c_trace_context();
                     match self
@@ -2259,11 +2308,15 @@ fn map_response_stream(
     session_telemetry: SessionTelemetry,
     inference_trace_attempt: InferenceTraceAttempt,
     provider: SharedModelProvider,
+    mut sushi_attempt: Option<SushiRequestAttempt>,
 ) -> (ResponseStream, oneshot::Receiver<LastResponse>) {
     let codex_api::ResponseStream {
         rx_event,
         upstream_request_id,
     } = api_stream;
+    if let Some(attempt) = &mut sushi_attempt {
+        attempt.set_request_id(upstream_request_id.as_deref());
+    }
     let api_stream = codex_api::ResponseStream {
         rx_event,
         upstream_request_id: None,
@@ -2274,6 +2327,7 @@ fn map_response_stream(
         session_telemetry,
         inference_trace_attempt,
         provider,
+        sushi_attempt,
     )
 }
 
@@ -2283,6 +2337,7 @@ fn map_response_events<S>(
     session_telemetry: SessionTelemetry,
     inference_trace_attempt: InferenceTraceAttempt,
     provider: SharedModelProvider,
+    mut sushi_attempt: Option<SushiRequestAttempt>,
 ) -> (ResponseStream, oneshot::Receiver<LastResponse>)
 where
     S: futures::Stream<Item = std::result::Result<ResponseEvent, ApiError>>
@@ -2321,6 +2376,9 @@ where
             let Some(event) = event else {
                 break;
             };
+            if let (Some(attempt), Ok(event)) = (&mut sushi_attempt, &event) {
+                attempt.observe(event);
+            }
             match event {
                 Ok(ResponseEvent::OutputItemDone(item)) => {
                     items_added.push(item.clone());
@@ -2395,7 +2453,14 @@ where
                     if let Some(upstream_request_id) = upstream_request_id {
                         feedback_tags!(last_model_request_id = upstream_request_id);
                     }
-                    let mapped = provider.map_api_error(err);
+                    let stage = if matches!(err, ApiError::InvalidRequest { .. }) {
+                        codex_protocol::execution_error::ExecutionErrorStage::ProviderResponse
+                    } else {
+                        codex_protocol::execution_error::ExecutionErrorStage::StreamProcessing
+                    };
+                    let mapped = provider
+                        .map_api_error(err)
+                        .with_execution_context(stage, /*http_status_code*/ None);
                     inference_trace_attempt.record_failed(
                         &mapped,
                         upstream_request_id,
@@ -2420,6 +2485,7 @@ where
 
     (
         ResponseStream {
+            tool_result_tx: None,
             rx_event,
             consumer_dropped: consumer_dropped_for_stream,
         },
