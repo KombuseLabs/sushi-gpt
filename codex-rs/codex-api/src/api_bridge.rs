@@ -19,6 +19,45 @@ use serde::Deserialize;
 use serde_json::Value;
 
 pub fn map_api_error(err: ApiError) -> CodexErr {
+    use codex_protocol::execution_error::ExecutionErrorStage;
+    let context = match &err {
+        ApiError::Api { status, .. } | ApiError::Transport(TransportError::Http { status, .. }) => {
+            Some((ExecutionErrorStage::ProviderResponse, Some(status.as_u16())))
+        }
+        ApiError::Transport(TransportError::Build(_)) => {
+            Some((ExecutionErrorStage::RequestPreparation, None))
+        }
+        ApiError::Transport(TransportError::ResponseTooLarge { .. }) => {
+            Some((ExecutionErrorStage::ProviderResponse, None))
+        }
+        ApiError::Transport(_) => Some((ExecutionErrorStage::Transport, None)),
+        _ => None,
+    };
+    let validation = match &err {
+        ApiError::Transport(TransportError::Http { status, body, .. })
+            if *status == http::StatusCode::BAD_REQUEST =>
+        {
+            Some(crate::provider_validation::extract(
+                body.as_deref().unwrap_or_default(),
+            ))
+        }
+        ApiError::Api { status, message } if *status == http::StatusCode::BAD_REQUEST => {
+            Some(crate::provider_validation::extract(message))
+        }
+        _ => None,
+    };
+    let error = map_api_error_details(err);
+    let error = match context {
+        Some((stage, status)) => error.with_execution_context(stage, status),
+        None => error,
+    };
+    match validation {
+        Some(validation) => error.with_provider_validation(validation),
+        None => error,
+    }
+}
+
+fn map_api_error_details(err: ApiError) -> CodexErr {
     match err {
         ApiError::ContextWindowExceeded => CodexErr::ContextWindowExceeded,
         ApiError::QuotaExceeded => CodexErr::QuotaExceeded,

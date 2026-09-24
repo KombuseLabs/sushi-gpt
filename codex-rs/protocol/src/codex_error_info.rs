@@ -44,6 +44,12 @@ enum CodexErrorInfoWire {
     ActiveTurnNotSteerable {
         turn_kind: NonSteerableTurnKind,
     },
+    ExecutionError {
+        stage: crate::execution_error::ExecutionErrorStage,
+        category: crate::execution_error::ExecutionErrorCategory,
+        http_status_code: Option<u16>,
+        provider_validation: Option<crate::execution_error::ProviderValidation>,
+    },
     ThreadRollbackFailed,
     #[serde(other)]
     Other,

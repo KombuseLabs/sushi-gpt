@@ -117,6 +117,16 @@ pub enum CodexErrorInfo {
         #[ts(rename = "turnKind")]
         turn_kind: NonSteerableTurnKind,
     },
+    ExecutionError {
+        stage: codex_protocol::execution_error::ExecutionErrorStage,
+        category: codex_protocol::execution_error::ExecutionErrorCategory,
+        #[serde(rename = "httpStatusCode")]
+        #[ts(rename = "httpStatusCode")]
+        http_status_code: Option<u16>,
+        #[serde(rename = "providerValidation")]
+        #[ts(rename = "providerValidation")]
+        provider_validation: Option<codex_protocol::execution_error::ProviderValidation>,
+    },
     Other,
 }
 
@@ -155,6 +165,17 @@ impl From<CoreCodexErrorInfo> for CodexErrorInfo {
                     turn_kind: turn_kind.into(),
                 }
             }
+            CoreCodexErrorInfo::ExecutionError {
+                stage,
+                category,
+                http_status_code,
+                provider_validation,
+            } => CodexErrorInfo::ExecutionError {
+                stage,
+                category,
+                http_status_code,
+                provider_validation,
+            },
             CoreCodexErrorInfo::Other => CodexErrorInfo::Other,
         }
     }
@@ -328,3 +349,7 @@ impl From<CoreSandboxMode> for SandboxMode {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "execution_error_tests.rs"]
+mod execution_error_tests;

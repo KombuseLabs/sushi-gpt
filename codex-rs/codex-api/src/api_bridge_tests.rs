@@ -60,7 +60,16 @@ fn map_api_error_distinguishes_capacity_from_slow_down() {
             false,
         ),
         ("slow_down", CodexErrorInfo::RateLimitExceeded, true),
-        ("unknown_error", CodexErrorInfo::Other, true),
+        (
+            "unknown_error",
+            CodexErrorInfo::ExecutionError {
+                stage: codex_protocol::execution_error::ExecutionErrorStage::ProviderResponse,
+                category: codex_protocol::execution_error::ExecutionErrorCategory::Other,
+                http_status_code: Some(503),
+                provider_validation: None,
+            },
+            true,
+        ),
     ] {
         let err = map_api_error(ApiError::Transport(TransportError::Http {
             status: http::StatusCode::SERVICE_UNAVAILABLE,
@@ -608,4 +617,43 @@ fn map_api_error_extracts_identity_auth_details_from_headers() {
         Some("missing_authorization_header")
     );
     assert_eq!(err.identity_error_code.as_deref(), Some("token_expired"));
+}
+
+#[test]
+fn execution_diagnostics_preserve_http_status_without_payload() -> serde_json::Result<()> {
+    let error = map_api_error(ApiError::Transport(TransportError::Http {
+        status: http::StatusCode::BAD_REQUEST,
+        url: Some("https://SECRET.invalid/path".into()),
+        headers: None,
+        body: Some("SECRET_PROVIDER_BODY".into()),
+    }));
+    assert_eq!(
+        serde_json::to_value(error.to_codex_protocol_error())?,
+        serde_json::json!({
+            "execution_error":{"stage":"providerResponse","category":"invalidRequest","http_status_code":400,"provider_validation":{"code":null,"parameter":null,"toolLocation":null}}
+        })
+    );
+    assert_eq!(error.retry_delay(/*retry_count*/ 1), None);
+    Ok(())
+}
+
+#[test]
+fn execution_diagnostics_distinguish_transport_build_and_timeout() -> serde_json::Result<()> {
+    for (source, stage, category) in [
+        (
+            TransportError::Build("SECRET".into()),
+            "requestPreparation",
+            "stream",
+        ),
+        (TransportError::Timeout, "transport", "timeout"),
+    ] {
+        let error = map_api_error(ApiError::Transport(source));
+        assert_eq!(
+            serde_json::to_value(error.to_codex_protocol_error())?,
+            serde_json::json!({
+                "execution_error":{"stage":stage,"category":category,"http_status_code":null,"provider_validation":null}
+            })
+        );
+    }
+    Ok(())
 }
