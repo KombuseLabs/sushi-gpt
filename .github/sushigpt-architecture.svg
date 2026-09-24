@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1510" height="541" viewBox="0 0 1510 541" role="img" aria-labelledby="title description">
+  <title id="title">One conversation. The right tool for each task.</title>
+  <desc id="description">Vision for SushiGPT: one conversational agent in the native Codex runtime coordinates native child agents with independently selected models and execution routes. A separate voice frontend connects the user to the conversation. Optional Jev classification guides configured model selection based on task fit, capabilities, quality, preferences, resources, and cost. Example routes branch into model choices: Claude through Claude Code execution to Claude Sonnet or Claude Opus; local deployment to Qwen3 or Gemma; the OpenRouter gateway to Gemini or DeepSeek; the OpenAI provider to GPT-6 Astra or GPT-6 Sol. These routes are illustrative, and model families may be available through multiple routes. This is an intended direction, not a list of currently supported integrations or a demonstrated optimizer. See the README Status section for current capabilities and verification limits.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M1 1 L7 4 L1 7" fill="none" stroke="#85968f" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <rect x="1" y="1" width="1508" height="539" rx="24" fill="#f8faf9" stroke="#e3e9e6"/>
+
+  <g fill="none" stroke="#85968f" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M185 270.5 H346" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+    <path d="M586 270.5 H786"/>
+    <path d="M786 270.5 V220 Q786 210 796 210 H862" marker-end="url(#arrow)"/>
+    <path d="M786 270.5 V99 Q786 89 796 89 H862" marker-end="url(#arrow)"/>
+    <path d="M786 270.5 V321 Q786 331 796 331 H862" marker-end="url(#arrow)"/>
+    <path d="M786 270.5 V442 Q786 452 796 452 H862" marker-end="url(#arrow)"/>
+    <path d="M685 220.5 V255.5" stroke="#aab9b2" stroke-dasharray="3 5"/>
+  </g>
+  <circle cx="786" cy="270.5" r="4" fill="#85968f"/>
+
+  <g font-family="Arial, Helvetica, sans-serif">
+    <text x="76" y="30" font-size="13" font-weight="600" fill="#657b6f">Vision</text>
+    <text x="76" y="59" font-size="24" font-weight="600" fill="#233d31">One conversation. The right tool for each task.</text>
+    <g transform="translate(0 60.5)">
+    <circle cx="123" cy="210" r="47" fill="#ffffff" stroke="#dce5df" stroke-width="1.5"/>
+    <g fill="none" stroke="#496458" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="112" cy="196" r="9"/>
+      <path d="M95 227 V222 C95 205 129 205 129 222 V227"/>
+      <rect x="139" y="198" width="9" height="18" rx="4.5"/>
+      <path d="M135 211 V212 A8.5 8.5 0 0 0 152 212 V211 M143.5 221 V229 M138.5 229 H148.5"/>
+    </g>
+    <text x="123" y="287" text-anchor="middle" font-size="22" fill="#233d31">You</text>
+    <text x="266" y="189" text-anchor="middle" font-size="16" fill="#657b6f">Voice</text>
+
+    <rect x="362" y="150" width="224" height="120" rx="20" fill="#e7f0e9" stroke="#bfd2c3" stroke-width="1.5"/>
+    <g transform="translate(0 -10)" fill="none" stroke="#3f6850" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M458 177 H490 A5 5 0 0 1 495 182 V196 A5 5 0 0 1 490 201 H472 L462 208 V201 H458 A5 5 0 0 1 453 196 V182 A5 5 0 0 1 458 177 Z"/>
+      <path d="M463 189 H485"/>
+    </g>
+    <text x="474" y="217" text-anchor="middle" font-size="22" font-weight="600" fill="#233d31">Conversational</text>
+    <text x="474" y="239" text-anchor="middle" font-size="22" font-weight="600" fill="#233d31">agent</text>
+    <text x="474" y="258" text-anchor="middle" font-size="13" fill="#536e5f">Codex runtime</text>
+
+    <rect x="598" y="108" width="174" height="52" rx="18" fill="#eef2ef" stroke="#dce5df"/>
+    <text x="685" y="130" text-anchor="middle" font-size="14" font-weight="600" fill="#536e5f">Jev · classifier</text>
+    <text x="685" y="149" text-anchor="middle" font-size="13" fill="#536e5f">Best fit for the task</text>
+
+    </g>
+
+    <g fill="#ffffff" stroke="#dce5df" stroke-width="1.5">
+      <rect x="878" y="47" width="250" height="84" rx="16"/>
+      <rect x="878" y="168" width="250" height="84" rx="16"/>
+      <rect x="878" y="289" width="250" height="84" rx="16"/>
+      <rect x="878" y="410" width="250" height="84" rx="16"/>
+    </g>
+    <g font-size="14" fill="#75857c">
+      <text x="901" y="69">Native agent</text>
+      <text x="901" y="190">Native agent</text>
+      <text x="901" y="311">Native agent</text>
+      <text x="901" y="432">Native agent</text>
+    </g>
+    <g font-size="23" fill="#233d31">
+      <text x="901" y="95">Claude</text>
+      <text x="901" y="216">Local models</text>
+      <text x="901" y="337">OpenRouter</text>
+      <text x="901" y="458">OpenAI</text>
+    </g>
+    <g font-size="13" fill="#657b6f">
+      <text x="901" y="115">Claude Code execution</text>
+      <text x="901" y="236">Local deployment</text>
+      <text x="901" y="357">Model gateway</text>
+      <text x="901" y="478">Model provider</text>
+    </g>
+
+    <text x="1225" y="30" font-size="13" font-weight="600" fill="#657b6f">Model examples</text>
+    <g fill="none" stroke="#85968f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M1128 89 H1164"/>
+      <path d="M1164 89 V73 Q1164 65 1172 65 H1209" marker-end="url(#arrow)"/>
+      <path d="M1164 89 V105 Q1164 113 1172 113 H1209" marker-end="url(#arrow)"/>
+    </g>
+    <rect x="1225" y="46" width="225" height="38" rx="12" fill="#ffffff" stroke="#dce5df"/>
+    <text x="1243" y="71" font-size="18" fill="#233d31">Claude Sonnet</text>
+    <rect x="1225" y="94" width="225" height="38" rx="12" fill="#ffffff" stroke="#dce5df"/>
+    <text x="1243" y="119" font-size="18" fill="#233d31">Claude Opus</text>
+    <g fill="none" stroke="#85968f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M1128 210 H1164"/>
+      <path d="M1164 210 V194 Q1164 186 1172 186 H1209" marker-end="url(#arrow)"/>
+      <path d="M1164 210 V226 Q1164 234 1172 234 H1209" marker-end="url(#arrow)"/>
+    </g>
+    <rect x="1225" y="167" width="225" height="38" rx="12" fill="#ffffff" stroke="#dce5df"/>
+    <text x="1243" y="192" font-size="18" fill="#233d31">Qwen3</text>
+    <rect x="1225" y="215" width="225" height="38" rx="12" fill="#ffffff" stroke="#dce5df"/>
+    <text x="1243" y="240" font-size="18" fill="#233d31">Gemma</text>
+    <g fill="none" stroke="#85968f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M1128 331 H1164"/>
+      <path d="M1164 331 V315 Q1164 307 1172 307 H1209" marker-end="url(#arrow)"/>
+      <path d="M1164 331 V347 Q1164 355 1172 355 H1209" marker-end="url(#arrow)"/>
+    </g>
+    <rect x="1225" y="288" width="225" height="38" rx="12" fill="#ffffff" stroke="#dce5df"/>
+    <text x="1243" y="313" font-size="18" fill="#233d31">Gemini</text>
+    <rect x="1225" y="336" width="225" height="38" rx="12" fill="#ffffff" stroke="#dce5df"/>
+    <text x="1243" y="361" font-size="18" fill="#233d31">DeepSeek</text>
+    <g fill="none" stroke="#85968f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M1128 452 H1164"/>
+      <path d="M1164 452 V436 Q1164 428 1172 428 H1209" marker-end="url(#arrow)"/>
+      <path d="M1164 452 V468 Q1164 476 1172 476 H1209" marker-end="url(#arrow)"/>
+    </g>
+    <rect x="1225" y="409" width="225" height="38" rx="12" fill="#ffffff" stroke="#dce5df"/>
+    <text x="1243" y="434" font-size="18" fill="#233d31">GPT-6 Astra</text>
+    <rect x="1225" y="457" width="225" height="38" rx="12" fill="#ffffff" stroke="#dce5df"/>
+    <text x="1243" y="482" font-size="18" fill="#233d31">GPT-6 Sol</text>
+  </g>
+</svg>
