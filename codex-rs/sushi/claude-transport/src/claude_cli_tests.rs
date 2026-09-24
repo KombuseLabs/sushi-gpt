@@ -24,6 +24,41 @@ fn reconstructs_tool_arguments_only_at_model_message_boundary() -> anyhow::Resul
     Ok(())
 }
 
+/// Runs one tool_use block through the stream with the given argument deltas and returns the
+/// assembled input, or the failure.
+fn assemble_tool_input(deltas: &[&str]) -> Result<Value> {
+    let mut stream = MessageStream::default();
+    stream.push(&json!({"type":"message_start","message":{"id":"response","model":"observed"}}))?;
+    stream.push(&json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call","name":"tool","input":{}}}))?;
+    for partial in deltas {
+        stream.push(&json!({"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":partial}}))?;
+    }
+    stream.push(&json!({"type":"content_block_stop","index":0}))?;
+    let message = stream
+        .push(&json!({"type":"message_stop"}))?
+        .ok_or_else(|| failure("missing message"))?;
+    Ok(message["content"][0]["input"].clone())
+}
+
+#[test]
+fn empty_argument_deltas_preserve_a_no_argument_tool_call() -> anyhow::Result<()> {
+    // The live CLI sends `input: {}` then an empty delta for a parameterless call.
+    for deltas in [
+        &[][..],
+        &[""][..],
+        &["", ""][..],
+        &["{}"][..],
+        &["", "{", "}"][..],
+    ] {
+        assert_eq!(assemble_tool_input(deltas)?, json!({}), "deltas {deltas:?}");
+    }
+    assert_eq!(assemble_tool_input(&["", "{\"a\":", "1}"])?, json!({"a":1}));
+    for deltas in [&[" "][..], &["{\"a\":"][..], &["not json"][..]] {
+        assert!(assemble_tool_input(deltas).is_err(), "deltas {deltas:?}");
+    }
+    Ok(())
+}
+
 #[cfg(unix)]
 async fn exercise(mode: &str) -> anyhow::Result<()> {
     use codex_tools::ResponsesApiTool;

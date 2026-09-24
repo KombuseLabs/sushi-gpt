@@ -111,11 +111,15 @@ impl MessageStream {
                                 }
                             }
                             Some("input_json_delta") if block["type"] == "tool_use" => {
-                                self.arguments.entry(index).or_default().push_str(
-                                    event["delta"]["partial_json"]
-                                        .as_str()
-                                        .ok_or_else(|| failure("invalid tool delta"))?,
-                                )
+                                let partial = event["delta"]["partial_json"]
+                                    .as_str()
+                                    .ok_or_else(|| failure("invalid tool delta"))?;
+                                // A no-argument call streams a valid `input: {}` in its start block
+                                // followed by an empty delta. Only nonempty fragments start an
+                                // argument buffer; nonempty fragments are still parsed strictly.
+                                if !partial.is_empty() {
+                                    self.arguments.entry(index).or_default().push_str(partial);
+                                }
                             }
                             _ => return Err(failure("unsupported model delta")),
                         }
