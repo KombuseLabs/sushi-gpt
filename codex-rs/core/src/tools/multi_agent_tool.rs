@@ -1,9 +1,11 @@
 //! Applies captured Multi-Agent V2 catalog overrides and namespaces to tool specifications.
-//! Parameter schemas retain harness-owned encryption annotations; execution is unchanged.
+//! Encryption remains the default; plaintext transport requires explicit opt-in and call metadata.
 
 use crate::session::session::Session;
+use crate::tools::context::ToolCallSource;
 use crate::tools::context::ToolInvocation;
 use crate::tools::registry::CoreToolRuntime;
+use codex_tools::FunctionCallError;
 use codex_tools::JsonSchema;
 use codex_tools::ResponsesApiNamespace;
 use codex_tools::ResponsesApiNamespaceTool;
@@ -24,6 +26,7 @@ pub(super) fn multi_agent_v2_handler(
     namespace: Option<&str>,
     description_override: Option<&str>,
     parameters_override: Option<&str>,
+    message_transport: AgentMessageTransport,
 ) -> Arc<dyn CoreToolRuntime> {
     let parameters_override = parameters_override.map(|parameters| -> Result<JsonSchema, &str> {
         let parameters: Value =
@@ -54,7 +57,11 @@ pub(super) fn multi_agent_v2_handler(
         tracing::warn!(tool = %handler.tool_name(), reason, "Invalid catalog tool parameters; using bundled parameters");
     }
     let parameters_override = parameters_override.and_then(Result::ok);
-    if namespace.is_none() && description_override.is_none() && parameters_override.is_none() {
+    if namespace.is_none()
+        && description_override.is_none()
+        && parameters_override.is_none()
+        && message_transport == AgentMessageTransport::Encrypted
+    {
         return Arc::new(handler);
     }
     Arc::new(MultiAgentV2ToolOverrides {
@@ -62,7 +69,14 @@ pub(super) fn multi_agent_v2_handler(
         namespace: namespace.map(str::to_owned),
         description_override: description_override.map(str::to_owned),
         parameters_override,
+        message_transport,
     })
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum AgentMessageTransport {
+    Encrypted,
+    DeclaredPlaintext,
 }
 
 struct MultiAgentV2ToolOverrides {
@@ -70,6 +84,7 @@ struct MultiAgentV2ToolOverrides {
     namespace: Option<String>,
     description_override: Option<String>,
     parameters_override: Option<JsonSchema>,
+    message_transport: AgentMessageTransport,
 }
 
 impl ToolExecutor<ToolInvocation> for MultiAgentV2ToolOverrides {
@@ -89,6 +104,15 @@ impl ToolExecutor<ToolInvocation> for MultiAgentV2ToolOverrides {
             }
             if let Some(parameters) = &self.parameters_override {
                 tool.parameters.clone_from(parameters);
+            }
+            if self.message_transport == AgentMessageTransport::DeclaredPlaintext
+                && let Some(message) = tool
+                    .parameters
+                    .properties
+                    .as_mut()
+                    .and_then(|p| p.get_mut("message"))
+            {
+                message.encrypted = None;
             }
         }
         match (&self.namespace, spec) {
@@ -119,6 +143,19 @@ impl ToolExecutor<ToolInvocation> for MultiAgentV2ToolOverrides {
     where
         ToolInvocation: 'a,
     {
+        if self.message_transport == AgentMessageTransport::DeclaredPlaintext
+            && matches!(
+                self.handler.tool_name().name.as_str(),
+                "spawn_agent" | "send_message" | "followup_task"
+            )
+            && invocation.source != ToolCallSource::DirectPlaintextMessage
+        {
+            return Box::pin(async {
+                Err(FunctionCallError::RespondToModel(
+                "Plaintext agent communication requires explicit encrypted_function_args=[]; encrypted or unspecified messages cannot be delivered in this mode.".to_string()
+            ))
+            });
+        }
         self.handler.handle(invocation)
     }
 }

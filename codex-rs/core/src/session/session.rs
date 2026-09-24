@@ -1667,7 +1667,7 @@ impl Session {
                 agents_md_manager,
                 plugins_manager: Arc::clone(&plugins_manager),
                 mcp_manager: Arc::clone(&mcp_manager),
-                extensions,
+                extensions: extensions.clone(),
                 // TODO(jif): extract session to share between sub-agents
                 session_extension_data,
                 thread_extension_data,
@@ -1709,6 +1709,7 @@ impl Session {
                     config.http_client_factory(),
                     config.workspace_routing_context(),
                 )
+                .with_model_extensions(&extensions)
                 .with_restored_history(matches!(
                     &initial_history,
                     InitialHistory::Resumed(_) | InitialHistory::Forked(_)

@@ -46,6 +46,7 @@ async fn retries_on_early_close() {
     // environment variables.
 
     let model_provider = ModelProviderInfo {
+        cli_command: None,
         name: "openai".into(),
         base_url: Some(format!("{}/v1", server.uri())),
         model_catalog_url: None,

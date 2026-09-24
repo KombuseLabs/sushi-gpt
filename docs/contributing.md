@@ -1,39 +1,25 @@
-## Contributing
+# Contributing to SushiGPT
 
-We welcome community contributions through the [openai/codex issue tracker](https://github.com/openai/codex/issues). Bug reports, root-cause analyses, and feature requests help us understand what matters most and improve Codex.
+SushiGPT's fork-specific development is voice-directed and AI-assisted, funded by its maintainers. To keep review and maintenance sustainable, contributions are deliberately limited to:
 
-**We do not accept external code contributions or pull requests.**
+- Bug reports, diagnosis, and fixes.
+- Security and safety issues or fixes.
+- System stability and reliability improvements.
 
-### Why we do not accept external code contributions
+**External feature contributions and feature pull requests will not be merged.** Feature development remains maintainer-led.
 
-Effective changes to Codex require architectural context, an understanding of system-level constraints, and visibility into the project's roadmap. External pull requests often focus on issues that are lower priority, affect a small number of users, or need substantial changes to fit the broader system. Reviewing and iterating on those changes can take more time than implementing a fix directly, diverting attention from higher-priority work.
+## Reporting issues
 
-Community expertise is most valuable when shared through detailed bug reports, reproduction steps, logs, root-cause analysis, and design discussions in issues. Understanding the problem, identifying the right solution, and prioritizing the work are typically the hard parts; implementation is comparatively straightforward with the help of Codex itself.
+For bugs, non-sensitive safety concerns, or reliability problems, search this repository's [issue tracker](https://github.com/KombuseLabs/sushi-gpt/issues) before opening a report. Include reproduction steps, expected and actual behavior, the fork revision or executable version, and relevant environment details. Remove secrets and personal information from logs.
 
-For these reasons, we focus community contributions on issue reports, analysis, and feedback, while the Codex team handles code changes.
+For vulnerabilities or sensitive security findings, follow the [security policy](../SECURITY.md). Do not disclose vulnerability details in public issues or pull requests.
 
-### Reporting bugs
+## Submitting fixes
 
-Before opening a new issue, search the issue tracker to see whether the problem has already been reported. If it has, add any new information to the existing issue.
+Keep pull requests focused on an allowed category. Explain the problem, the fix, and the validation performed, including any limits or untested behavior. Follow the applicable repository instructions and avoid unrelated changes. Review does not guarantee acceptance.
 
-When reporting a bug, include as much relevant detail as possible:
+Treat others respectfully. Contributors may use their preferred development tools; voice-directed coding is not a contribution requirement.
 
-- Clear, detailed steps to reproduce the problem.
-- Expected and actual behavior.
-- Your Codex version, operating system, and other relevant environment details.
-- Logs, error messages, or other diagnostic information, with sensitive information removed.
-- Root-cause analysis, technical observations, or potential approaches to a fix, if available.
+## License and upstream contributions
 
-### Requesting features
-
-Open a feature request in the issue tracker, or upvote an existing request that describes the same need. Explain your use case, the behavior you would like, and why it would improve your workflow.
-
-### Community values
-
-- **Be kind and inclusive.** Treat others with respect; we follow the [Contributor Covenant](https://www.contributor-covenant.org/).
-- **Assume good intent.** Written communication is hard, so err on the side of generosity.
-- **Share what you learn.** Reproduction details, logs, and analysis help the entire community.
-
-### Security
-
-If you discover a security vulnerability, follow the [security policy](../SECURITY.md) instead of reporting it in a public issue.
+The repository's [Apache-2.0 license](../LICENSE) is unchanged. The retained [OpenAI CLA](CLA.md) concerns contributions to upstream OpenAI Codex; it is not a new SushiGPT-specific agreement. Contributions submitted upstream must follow that project's own policies.

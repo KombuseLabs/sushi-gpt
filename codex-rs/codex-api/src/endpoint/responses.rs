@@ -26,6 +26,7 @@ use tracing::instrument;
 pub struct ResponsesClient<T: HttpTransport> {
     session: EndpointSession<T>,
     sse_telemetry: Option<Arc<dyn SseTelemetry>>,
+    openresponses: bool,
 }
 
 #[derive(Default)]
@@ -43,7 +44,14 @@ impl<T: HttpTransport> ResponsesClient<T> {
         Self {
             session: EndpointSession::new(transport, provider, auth),
             sse_telemetry: None,
+            openresponses: false,
         }
+    }
+
+    /// Opt in to stateless standard Responses tool and plaintext message adaptation.
+    pub fn with_openresponses(mut self) -> Self {
+        self.openresponses = true;
+        self
     }
 
     pub fn with_telemetry(
@@ -54,6 +62,7 @@ impl<T: HttpTransport> ResponsesClient<T> {
         Self {
             session: self.session.with_request_telemetry(request),
             sse_telemetry: sse,
+            openresponses: self.openresponses,
         }
     }
 
@@ -80,8 +89,16 @@ impl<T: HttpTransport> ResponsesClient<T> {
             compression,
             turn_state,
         } = options;
-        let body = EncodedJsonBody::encode(&request)
-            .map_err(|e| ApiError::Stream(format!("failed to encode responses request: {e}")))?;
+        let (body, adapter) = if self.openresponses {
+            let mut body = serde_json::to_value(&request).map_err(|_| {
+                ApiError::Stream("Unable to serialize compatible request".to_string())
+            })?;
+            let adapter = crate::openresponses::Adapter::prepare(&mut body)?;
+            (EncodedJsonBody::encode(&body), Some(adapter))
+        } else {
+            (EncodedJsonBody::encode(&request), None)
+        };
+        let body = body.map_err(encode_error)?;
 
         let mut headers = extra_headers;
         if let Some(ref thread_id) = thread_id {
@@ -92,7 +109,7 @@ impl<T: HttpTransport> ResponsesClient<T> {
             insert_header(&mut headers, "x-openai-subagent", &subagent);
         }
 
-        self.stream_encoded(body, headers, compression, turn_state)
+        self.stream_adapted(body, adapter, headers, compression, turn_state)
             .await
     }
 
@@ -109,15 +126,37 @@ impl<T: HttpTransport> ResponsesClient<T> {
     )]
     pub async fn stream(
         &self,
-        body: Value,
+        mut body: Value,
         extra_headers: HeaderMap,
         compression: Compression,
         turn_state: Option<Arc<OnceLock<String>>>,
     ) -> Result<ResponseStream, ApiError> {
-        let body = EncodedJsonBody::encode(&body)
-            .map_err(|e| ApiError::Stream(format!("failed to encode responses request: {e}")))?;
-        self.stream_encoded(body, extra_headers, compression, turn_state)
+        let adapter = if self.openresponses {
+            Some(crate::openresponses::Adapter::prepare(&mut body)?)
+        } else {
+            None
+        };
+        let body = EncodedJsonBody::encode(&body).map_err(encode_error)?;
+        self.stream_adapted(body, adapter, extra_headers, compression, turn_state)
             .await
+    }
+
+    /// Streams an encoded body, translating events back through the adapter when one applies.
+    async fn stream_adapted(
+        &self,
+        body: EncodedJsonBody,
+        adapter: Option<crate::openresponses::Adapter>,
+        extra_headers: HeaderMap,
+        compression: Compression,
+        turn_state: Option<Arc<OnceLock<String>>>,
+    ) -> Result<ResponseStream, ApiError> {
+        let stream = self
+            .stream_encoded(body, extra_headers, compression, turn_state)
+            .await?;
+        Ok(match adapter {
+            Some(adapter) => adapter.wrap(stream),
+            None => stream,
+        })
     }
 
     async fn stream_encoded(
@@ -156,4 +195,8 @@ impl<T: HttpTransport> ResponsesClient<T> {
             turn_state,
         ))
     }
+}
+
+fn encode_error(error: impl std::fmt::Display) -> ApiError {
+    ApiError::Stream(format!("failed to encode responses request: {error}"))
 }

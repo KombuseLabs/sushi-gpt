@@ -2,7 +2,9 @@ load("//:defs.bzl", "codex_rust_crate")
 
 codex_rust_crate(
     name = "core",
-    compile_data = glob(["assets/**"]),
+    compile_data = glob([
+        "assets/**",
+    ]) + ["//codex-rs/sushi/claude-transport:tests/fixtures/peer.py"],
     crate_name = "codex_core",
     crate_srcs = glob(["src/**/*.rs"]) + [
         "//codex-rs/ext/guardian-v2:src/sync_reviewer/reviewer_config.rs",
@@ -18,7 +20,9 @@ codex_rust_crate(
         "//codex-rs/windows-sandbox-rs:codex-windows-managed-deny-probe",
         "//codex-rs/windows-sandbox-rs:codex-windows-sandbox-setup",
     ],
-    integration_compile_data_extra = glob(["assets/**"]),
+    integration_compile_data_extra = glob([
+        "assets/**",
+    ]) + ["//codex-rs/sushi/claude-transport:tests/fixtures/peer.py"],
     integration_test_timeout = "long",
     run_tests_with_wine_exec = True,
     rustc_env = {

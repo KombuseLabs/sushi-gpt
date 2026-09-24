@@ -88,6 +88,7 @@ use tracing::warn;
 mod bem;
 mod existing_call;
 mod sideband;
+mod terminal;
 
 use self::bem::ChannelParser as BemChannelParser;
 use self::bem::message_phase as bem_message_phase;
@@ -361,6 +362,10 @@ fn take_last_bytes_at_char_boundary(text: &str, max_bytes: usize) -> &str {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum RealtimeOutbound {
+    FailedHandoff {
+        handoff_id: String,
+        text: String,
+    },
     StandaloneHandoff {
         text: String,
         phase: Option<MessagePhase>,
@@ -2190,6 +2195,11 @@ async fn handle_handoff_output(
     let handoff_output = handoff_output.context("handoff output channel closed")?;
     let result = match event_parser {
         RealtimeEventParser::V1 => match handoff_output {
+            RealtimeOutbound::FailedHandoff { handoff_id, text } => {
+                writer
+                    .send_conversation_function_call_output(handoff_id, text)
+                    .await
+            }
             RealtimeOutbound::StandaloneHandoff { text, phase: _ } => {
                 writer
                     .send_standalone_handoff(STANDALONE_HANDOFF_ID.to_string(), text)
@@ -2231,6 +2241,13 @@ async fn handle_handoff_output(
             RealtimeOutbound::HandoffCompleteAck { .. } => Ok(()),
         },
         RealtimeEventParser::FramelessBidi => match handoff_output {
+            RealtimeOutbound::FailedHandoff { handoff_id, text } => {
+                // Use the default reasoning channel, so the bounded notice is
+                // interpreted in context rather than read verbatim as speech.
+                writer
+                    .send_conversation_function_call_output(handoff_id, text)
+                    .await
+            }
             RealtimeOutbound::StandaloneHandoff { text, phase } => {
                 v3_output_writer(
                     writer,
@@ -2298,6 +2315,18 @@ async fn handle_handoff_output(
             RealtimeOutbound::HandoffCompleteAck { .. } => Ok(()),
         },
         RealtimeEventParser::RealtimeV2 => match handoff_output {
+            RealtimeOutbound::FailedHandoff { handoff_id, text } => {
+                if let Err(err) = writer
+                    .send_conversation_function_call_output(handoff_id, text)
+                    .await
+                {
+                    Err(err)
+                } else {
+                    return response_create_queue
+                        .request_create(writer, "failed handoff")
+                        .await;
+                }
+            }
             RealtimeOutbound::StandaloneHandoff { text, phase: _ } => {
                 if let Err(err) = writer
                     .send_conversation_item_create(text, ConversationTextRole::User)

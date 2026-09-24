@@ -1,0 +1,540 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SushiGPT local telemetry v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "processInstanceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "generationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "droppedRecords": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timestampMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recordId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "kind": {
+          "const": "routing_decision"
+        },
+        "decisionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "parentThreadId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "parentTurnId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9_./:@-]+$"
+        },
+        "callId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9_./:@-]+$"
+        },
+        "childThreadId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requestedModel": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9_./:@-]+$"
+        },
+        "policyModel": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9_./:@-]+$"
+        },
+        "selectedModel": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9_./:@-]+$"
+        },
+        "source": {
+          "enum": [
+            "native",
+            "rule",
+            "jev",
+            "fallback"
+          ]
+        },
+        "reasonCode": {
+          "enum": [
+            "native",
+            "explicit",
+            "full_history",
+            "routing_off",
+            "control_invalid",
+            "no_rule",
+            "rule_matched",
+            "jev_selected",
+            "invalid_target_settings",
+            "unsupported_input",
+            "unavailable_model",
+            "missing_key",
+            "transport",
+            "timeout",
+            "http",
+            "oversized_response",
+            "invalid_response",
+            "uncertain",
+            "rules_only",
+            "jev_disabled",
+            "request_started",
+            "cancelled"
+          ]
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "processInstanceId",
+        "generationId",
+        "sequence",
+        "droppedRecords",
+        "timestampMs",
+        "recordId",
+        "kind",
+        "decisionId",
+        "parentThreadId",
+        "parentTurnId",
+        "callId",
+        "childThreadId",
+        "requestedModel",
+        "policyModel",
+        "selectedModel",
+        "source",
+        "reasonCode"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "processInstanceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "generationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "droppedRecords": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timestampMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recordId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "kind": {
+          "const": "response_usage"
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9_./:@-]+$"
+        },
+        "threadId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9_./:@-]+$"
+        },
+        "turnId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9_./:@-]+$"
+        },
+        "parentThreadId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parentTurnId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9_./:@-]+$"
+        },
+        "rootTurnId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9_./:@-]+$"
+        },
+        "decisionId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requestId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9_./:@-]+$"
+        },
+        "responseId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9_./:@-]+$"
+        },
+        "attemptId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "requestedModel": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9_./:@-]+$"
+        },
+        "executedModel": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9_./:@-]+$"
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "inputTokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "outputTokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "cachedInputTokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "cacheWriteInputTokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "reasoningOutputTokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "totalTokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "inputTokens",
+                "outputTokens",
+                "cachedInputTokens",
+                "cacheWriteInputTokens",
+                "reasoningOutputTokens",
+                "totalTokens"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "completed",
+            "incomplete"
+          ]
+        },
+        "transport": {
+          "const": "claude_cli"
+        },
+        "transportInstanceId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "cliVersion": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 40,
+          "pattern": "^[0-9.]+$"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "processInstanceId",
+        "generationId",
+        "sequence",
+        "droppedRecords",
+        "timestampMs",
+        "recordId",
+        "kind",
+        "sessionId",
+        "threadId",
+        "turnId",
+        "parentThreadId",
+        "parentTurnId",
+        "rootTurnId",
+        "decisionId",
+        "requestId",
+        "responseId",
+        "attemptId",
+        "requestedModel",
+        "executedModel",
+        "usage",
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "processInstanceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "generationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "droppedRecords": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timestampMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recordId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "parentThreadId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "parentTurnId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9_./:@-]+$"
+        },
+        "kind": {
+          "const": "classifier_transition"
+        },
+        "attemptId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "phase": {
+          "enum": [
+            "skipped",
+            "request_started",
+            "succeeded",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "reasonCode": {
+          "enum": [
+            "native",
+            "explicit",
+            "full_history",
+            "routing_off",
+            "control_invalid",
+            "no_rule",
+            "rule_matched",
+            "jev_selected",
+            "invalid_target_settings",
+            "unsupported_input",
+            "unavailable_model",
+            "missing_key",
+            "transport",
+            "timeout",
+            "http",
+            "oversized_response",
+            "invalid_response",
+            "uncertain",
+            "rules_only",
+            "jev_disabled",
+            "request_started",
+            "cancelled"
+          ]
+        },
+        "requestStarted": {
+          "type": "boolean"
+        },
+        "recommendedModel": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9_./:@-]+$"
+        },
+        "httpStatusCode": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 100,
+          "maximum": 599
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "processInstanceId",
+        "generationId",
+        "sequence",
+        "droppedRecords",
+        "timestampMs",
+        "recordId",
+        "parentThreadId",
+        "parentTurnId",
+        "kind",
+        "attemptId",
+        "phase",
+        "reasonCode",
+        "requestStarted",
+        "recommendedModel",
+        "httpStatusCode"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

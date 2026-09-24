@@ -1884,6 +1884,13 @@ pub enum CodexErrorInfo {
     ActiveTurnNotSteerable {
         turn_kind: NonSteerableTurnKind,
     },
+    /// Payload-free context for an otherwise unclassified execution failure.
+    ExecutionError {
+        stage: crate::execution_error::ExecutionErrorStage,
+        category: crate::execution_error::ExecutionErrorCategory,
+        http_status_code: Option<u16>,
+        provider_validation: Option<crate::execution_error::ProviderValidation>,
+    },
     // Retained to deserialize errors recorded in legacy rollouts.
     ThreadRollbackFailed,
     Other,
@@ -1910,6 +1917,7 @@ impl CodexErrorInfo {
             | Self::SandboxError
             | Self::ResponseStreamDisconnected { .. }
             | Self::ResponseTooManyFailedAttempts { .. }
+            | Self::ExecutionError { .. }
             | Self::Other => true,
         }
     }

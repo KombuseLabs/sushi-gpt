@@ -1,5 +1,9 @@
 [workspace]
 members = [
+    "sushi/claude-transport",
+    "sushi/routing",
+    "sushi/diagnostics",
+    "sushi/routing-policy",
     "aws-auth",
     "analytics",
     "agent-graph-store",
@@ -163,6 +167,10 @@ edition = "2024"
 license = "Apache-2.0"
 
 [workspace.dependencies]
+codex-sushi-claude-transport = { path = "sushi/claude-transport" }
+codex-sushi-routing = { path = "sushi/routing" }
+codex-sushi-diagnostics = { path = "sushi/diagnostics" }
+codex-sushi-routing-policy = { path = "sushi/routing-policy" }
 # Internal
 codex-realtime-webrtc = { path = "realtime-webrtc" }
 app_test_support = { path = "app-server/tests/common" }

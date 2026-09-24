@@ -1,3 +1,6 @@
+use crate::AgentRouting;
+use crate::ModelRequestObserver;
+use crate::ModelTransportFactory;
 use std::sync::Arc;
 
 use crate::ApprovalReviewContributor;
@@ -25,6 +28,9 @@ impl<C: Sync> Default for ExtensionRegistryBuilder<C> {
     fn default() -> Self {
         Self {
             registry: ExtensionRegistry {
+                agent_routing: None,
+                model_transport: None,
+                model_request_observer: None,
                 event_sink: Arc::new(NoopExtensionEventSink),
                 turn_start_admission: None,
                 thread_lifecycle_contributors: Vec::new(),
@@ -137,6 +143,30 @@ impl<C: Sync> ExtensionRegistryBuilder<C> {
         self.registry.turn_item_contributors.push(contributor);
     }
 
+    /// Installs the single routing authority. Duplicate installations are configuration errors.
+    pub fn agent_routing(&mut self, routing: Arc<dyn AgentRouting>) {
+        assert!(
+            self.registry.agent_routing.is_none(),
+            "routing already registered"
+        );
+        self.registry.agent_routing = Some(routing);
+    }
+    /// Installs a native-child transport factory.
+    pub fn model_transport(&mut self, factory: Arc<dyn ModelTransportFactory>) {
+        assert!(
+            self.registry.model_transport.is_none(),
+            "model transport already registered"
+        );
+        self.registry.model_transport = Some(factory);
+    }
+    /// Installs passive model request diagnostics.
+    pub fn model_request_observer(&mut self, observer: Arc<dyn ModelRequestObserver>) {
+        assert!(
+            self.registry.model_request_observer.is_none(),
+            "model observer already registered"
+        );
+        self.registry.model_request_observer = Some(observer);
+    }
     /// Finishes construction and returns the immutable registry.
     pub fn build(self) -> ExtensionRegistry<C> {
         self.registry
@@ -145,6 +175,9 @@ impl<C: Sync> ExtensionRegistryBuilder<C> {
 
 /// Immutable typed registry produced after extensions are installed.
 pub struct ExtensionRegistry<C: Sync> {
+    agent_routing: Option<Arc<dyn AgentRouting>>,
+    model_transport: Option<Arc<dyn ModelTransportFactory>>,
+    model_request_observer: Option<Arc<dyn ModelRequestObserver>>,
     event_sink: Arc<dyn ExtensionEventSink>,
     turn_start_admission: Option<Arc<dyn TurnStartAdmission>>,
     thread_lifecycle_contributors: Vec<Arc<dyn ThreadLifecycleContributor<C>>>,
@@ -162,10 +195,22 @@ pub struct ExtensionRegistry<C: Sync> {
 }
 
 impl<C: Sync> ExtensionRegistry<C> {
+    pub fn agent_routing(&self) -> Option<&Arc<dyn AgentRouting>> {
+        self.agent_routing.as_ref()
+    }
+    pub fn model_transport(&self) -> Option<&Arc<dyn ModelTransportFactory>> {
+        self.model_transport.as_ref()
+    }
+    pub fn model_request_observer(&self) -> Option<&Arc<dyn ModelRequestObserver>> {
+        self.model_request_observer.as_ref()
+    }
     /// Copies the registered contributors into a builder for host-specific additions.
     pub fn to_builder(&self) -> ExtensionRegistryBuilder<C> {
         ExtensionRegistryBuilder {
             registry: Self {
+                agent_routing: self.agent_routing.clone(),
+                model_transport: self.model_transport.clone(),
+                model_request_observer: self.model_request_observer.clone(),
                 event_sink: self.event_sink.clone(),
                 turn_start_admission: self.turn_start_admission.clone(),
                 thread_lifecycle_contributors: self.thread_lifecycle_contributors.clone(),

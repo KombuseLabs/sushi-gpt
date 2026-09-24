@@ -137,6 +137,9 @@ async fn run_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
         config.codex_home.clone(),
     ));
     let mut extensions = ExtensionRegistryBuilder::<Config>::new();
+    codex_sushi_routing::install(&mut extensions);
+    codex_sushi_claude_transport::install(&mut extensions);
+    codex_sushi_diagnostics::install(&mut extensions);
     install_image_generation_extension(&mut extensions, auth_manager.clone(), |config: &Config| {
         Some(config.codex_home.clone())
     });
@@ -265,6 +268,7 @@ fn new_config(model: Option<String>, arg0_paths: Arg0DispatchPaths) -> anyhow::R
         tool_output_token_limit: None,
         agents_enabled: true,
         agent_max_threads: Some(6),
+        agent_model_routing: None,
         agent_default_subagent_model: None,
         agent_default_subagent_reasoning_effort: None,
         agent_interrupt_message_enabled: false,

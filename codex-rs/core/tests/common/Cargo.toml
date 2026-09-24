@@ -12,6 +12,9 @@ doctest = false
 workspace = true
 
 [dependencies]
+codex-sushi-routing = { workspace = true }
+codex-sushi-claude-transport = { workspace = true }
+codex-sushi-diagnostics = { workspace = true }
 anyhow = { workspace = true }
 assert_cmd = { workspace = true }
 base64 = { workspace = true }

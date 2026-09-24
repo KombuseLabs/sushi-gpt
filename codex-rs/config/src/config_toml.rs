@@ -1,5 +1,7 @@
 //! Schema-heavy configuration TOML types used by Codex.
 
+pub use codex_sushi_routing_policy as agent_model_routing;
+
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::num::NonZeroU64;
@@ -31,6 +33,7 @@ use crate::types::ToolSuggestConfig;
 use crate::types::Tui;
 use crate::types::UriBasedFileOpener;
 use crate::types::WindowsToml;
+use agent_model_routing::AgentModelRouting;
 use codex_features::FeaturesToml;
 use codex_model_provider_info::AMAZON_BEDROCK_PROVIDER_ID;
 use codex_model_provider_info::AMAZON_BEDROCK_RUNTIME_PROVIDER_ID;
@@ -474,6 +477,9 @@ pub struct ConfigToml {
 
     /// Additional discoverable tools that can be suggested for installation.
     pub tool_suggest: Option<ToolSuggestConfig>,
+
+    /// Opt-in task-based model defaults for native subagent spawning.
+    pub agent_model_routing: Option<AgentModelRouting>,
 
     /// Agent-related settings (thread limits, etc.).
     pub agents: Option<AgentsToml>,

@@ -2031,6 +2031,15 @@ impl Session {
             .await
     }
 
+    pub(crate) async fn inherited_dynamic_tools(&self) -> Vec<DynamicToolSpec> {
+        self.state
+            .lock()
+            .await
+            .session_configuration
+            .dynamic_tools
+            .clone()
+    }
+
     pub(crate) async fn emit_instruction_warnings(&self, warnings: Vec<String>) {
         for message in warnings {
             self.send_event_raw(Event {
@@ -2449,6 +2458,14 @@ impl Session {
 
     async fn maybe_mirror_event_text_to_realtime(&self, msg: &EventMsg) {
         if self.conversation.running_state().await.is_none() {
+            return;
+        }
+        if let EventMsg::Error(error) = msg
+            && error.affects_turn_status()
+        {
+            if let Err(err) = self.conversation.fail_active_handoff().await {
+                debug!("failed to forward realtime terminal outcome: {err}");
+            }
             return;
         }
         match msg {
@@ -3762,7 +3779,15 @@ impl Session {
             turn_context.session_source,
             SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
         ) {
-            let root_service_tier = self.services.agent_control.root_service_tier();
+            // The local CLI has no service-tier setting. Do not restore an HTTP
+            // parent's tier after cross-provider child configuration cleared it.
+            let root_service_tier = if turn_context.provider.info().wire_api
+                == codex_model_provider_info::WireApi::ClaudeCli
+            {
+                None
+            } else {
+                self.services.agent_control.root_service_tier()
+            };
             if settings.selected().service_tier != root_service_tier {
                 let mut selected = settings.selected().clone();
                 selected.service_tier = root_service_tier;

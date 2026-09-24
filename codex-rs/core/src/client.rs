@@ -130,6 +130,9 @@ use crate::feedback_tags;
 use crate::responses_metadata::CodexResponsesMetadata;
 use crate::responses_metadata::subagent_header_value;
 use crate::util::emit_feedback_auth_recovery_tags;
+use codex_extension_api::ModelRequestAttempt;
+use codex_extension_api::ModelRequestObserver;
+use codex_extension_api::ModelTransport;
 use codex_feedback::FeedbackRequestTags;
 use codex_feedback::emit_feedback_request_tags_with_auth_env;
 use codex_login::auth::AgentIdentityAuthPolicy;
@@ -259,6 +262,8 @@ impl RequestRouteTelemetry {
 /// call site.
 #[derive(Debug, Clone)]
 pub struct ModelClient {
+    model_transport: Option<Arc<dyn ModelTransport>>,
+    model_request_observer: Option<Arc<dyn ModelRequestObserver>>,
     state: Arc<ModelClientState>,
     agent_identity_policy: AgentIdentityAuthPolicy,
     prompt_cache_key_override: Option<String>,
@@ -296,6 +301,7 @@ pub struct ModelClientSession {
     /// appends, or continuation requests), and must not send it between different turns.
     /// An auth ownership change clears it so the new owner gets fresh routing state.
     turn_state: Arc<OnceLock<String>>,
+    transport_turn: tokio_util::sync::CancellationToken,
 }
 
 #[derive(Debug, Clone)]
@@ -472,6 +478,29 @@ fn sideband_websocket_auth_headers(api_auth: &dyn AuthProvider) -> ApiHeaderMap 
 }
 
 impl ModelClient {
+    pub(crate) fn with_model_extensions(
+        mut self,
+        extensions: &codex_extension_api::ExtensionRegistry<crate::config::Config>,
+    ) -> Self {
+        self.model_request_observer = extensions.model_request_observer().cloned();
+        self.model_transport = extensions.model_transport().and_then(|factory| {
+            factory.create(
+                self.state.provider.info(),
+                self.model_request_observer.clone(),
+            )
+        });
+        self
+    }
+    fn request_attempt(
+        &self,
+        metadata: &CodexResponsesMetadata,
+        model: &str,
+    ) -> Option<Box<dyn ModelRequestAttempt>> {
+        self.model_request_observer
+            .as_ref()
+            .and_then(|observer| observer.start(&metadata.into(), model))
+    }
+
     #[allow(clippy::too_many_arguments)]
     /// Creates a new session-scoped `ModelClient`.
     ///
@@ -516,6 +545,8 @@ impl ModelClient {
             && !crate::guardian::is_basic_session_source(&session_source)
             && !memory_consolidation;
         Self {
+            model_transport: None,
+            model_request_observer: None,
             state: Arc::new(ModelClientState {
                 thread_id,
                 provider: model_provider,
@@ -608,6 +639,7 @@ impl ModelClient {
             client: self.clone(),
             websocket_session,
             turn_state: Arc::new(OnceLock::new()),
+            transport_turn: tokio_util::sync::CancellationToken::new(),
         }
     }
 
@@ -940,6 +972,7 @@ impl ModelClient {
                     encrypted_function_args,
                     ..
                 } = item
+                    && self.state.provider.info().wire_api != WireApi::OpenResponses
                 {
                     *encrypted_function_args = None;
                 }
@@ -1018,7 +1051,8 @@ impl ModelClient {
     ///
     /// WebSocket use is controlled by provider capability and session-scoped fallback state.
     pub fn responses_websocket_enabled(&self) -> bool {
-        if !self.state.provider.info().supports_websockets
+        if self.state.provider.info().wire_api == WireApi::OpenResponses
+            || !self.state.provider.info().supports_websockets
             || self.state.disable_websockets.load(Ordering::Relaxed)
         {
             return false;
@@ -1331,6 +1365,7 @@ impl ModelClient {
 
 impl Drop for ModelClientSession {
     fn drop(&mut self) {
+        self.transport_turn.cancel();
         let websocket_session = std::mem::take(&mut self.websocket_session);
         self.client
             .store_cached_websocket_session(websocket_session);
@@ -1712,6 +1747,14 @@ impl ModelClientSession {
                 client_setup.api_auth,
             )
             .with_telemetry(Some(request_telemetry), Some(sse_telemetry));
+            let extension_attempt = self
+                .client
+                .request_attempt(responses_metadata, &request.model);
+            let client = if self.client.state.provider.info().wire_api == WireApi::OpenResponses {
+                client.with_openresponses()
+            } else {
+                client
+            };
             let stream_result = client.stream_request(request, options).await;
 
             match stream_result {
@@ -1721,6 +1764,7 @@ impl ModelClientSession {
                         request_session_telemetry,
                         inference_trace_attempt,
                         Arc::clone(&self.client.state.provider),
+                        extension_attempt,
                     );
                     return Ok(stream);
                 }
@@ -1997,6 +2041,12 @@ impl ModelClientSession {
                     ("phase", if warmup { "warmup" } else { "generation" }),
                 ],
             );
+            let extension_attempt = (!warmup)
+                .then(|| {
+                    self.client
+                        .request_attempt(responses_metadata, &request.model)
+                })
+                .flatten();
             let stream_result = websocket_connection
                 .stream_request(
                     ws_request,
@@ -2026,6 +2076,7 @@ impl ModelClientSession {
                 request_session_telemetry,
                 inference_trace_attempt,
                 Arc::clone(&self.client.state.provider),
+                extension_attempt,
             );
             self.websocket_session.last_response_rx = Some(last_request_rx);
             return Ok(WebsocketStreamOutcome::Stream(stream));
@@ -2142,7 +2193,37 @@ impl ModelClientSession {
     ) -> Result<ResponseStream> {
         let wire_api = self.client.state.provider.info().wire_api;
         match wire_api {
-            WireApi::Responses => {
+            WireApi::ClaudeCli => {
+                if effort.is_some() {
+                    return Err(CodexErr::Fatal(
+                        "Local Claude does not support native reasoning-effort overrides.".into(),
+                    ));
+                }
+                if service_tier.is_some() {
+                    return Err(CodexErr::Fatal(
+                        "Local Claude does not support native service-tier overrides.".into(),
+                    ));
+                }
+                if self.client.restored_history
+                    || !self.client.state.session_source.is_non_root_agent()
+                {
+                    return Err(CodexErr::Fatal(
+                        "Local Claude currently requires a fresh native child.".into(),
+                    ));
+                }
+                let transport = self.client.model_transport.as_ref().ok_or_else(|| CodexErr::Fatal("Local model transport is configured but no transport extension is registered.".into()))?;
+                let stream = transport
+                    .stream(
+                        self.client.state.provider.info(),
+                        &prompt.into(),
+                        &model_info.slug,
+                        &responses_metadata.into(),
+                        self.transport_turn.clone(),
+                    )
+                    .await?;
+                Ok(stream.into())
+            }
+            WireApi::Responses | WireApi::OpenResponses => {
                 if self.client.responses_websocket_enabled() {
                     let request_trace = current_span_w3c_trace_context();
                     match self
@@ -2259,11 +2340,15 @@ fn map_response_stream(
     session_telemetry: SessionTelemetry,
     inference_trace_attempt: InferenceTraceAttempt,
     provider: SharedModelProvider,
+    mut extension_attempt: Option<Box<dyn ModelRequestAttempt>>,
 ) -> (ResponseStream, oneshot::Receiver<LastResponse>) {
     let codex_api::ResponseStream {
         rx_event,
         upstream_request_id,
     } = api_stream;
+    if let Some(attempt) = &mut extension_attempt {
+        attempt.set_request_id(upstream_request_id.as_deref());
+    }
     let api_stream = codex_api::ResponseStream {
         rx_event,
         upstream_request_id: None,
@@ -2274,6 +2359,7 @@ fn map_response_stream(
         session_telemetry,
         inference_trace_attempt,
         provider,
+        extension_attempt,
     )
 }
 
@@ -2283,6 +2369,7 @@ fn map_response_events<S>(
     session_telemetry: SessionTelemetry,
     inference_trace_attempt: InferenceTraceAttempt,
     provider: SharedModelProvider,
+    mut extension_attempt: Option<Box<dyn ModelRequestAttempt>>,
 ) -> (ResponseStream, oneshot::Receiver<LastResponse>)
 where
     S: futures::Stream<Item = std::result::Result<ResponseEvent, ApiError>>
@@ -2321,6 +2408,9 @@ where
             let Some(event) = event else {
                 break;
             };
+            if let (Some(attempt), Ok(event)) = (&mut extension_attempt, &event) {
+                attempt.observe(event);
+            }
             match event {
                 Ok(ResponseEvent::OutputItemDone(item)) => {
                     items_added.push(item.clone());
@@ -2395,7 +2485,14 @@ where
                     if let Some(upstream_request_id) = upstream_request_id {
                         feedback_tags!(last_model_request_id = upstream_request_id);
                     }
-                    let mapped = provider.map_api_error(err);
+                    let stage = if matches!(err, ApiError::InvalidRequest { .. }) {
+                        codex_protocol::execution_error::ExecutionErrorStage::ProviderResponse
+                    } else {
+                        codex_protocol::execution_error::ExecutionErrorStage::StreamProcessing
+                    };
+                    let mapped = provider.map_api_error(err).with_execution_context(
+                        stage, /*http_status_code*/ None, /*provider_validation*/ None,
+                    );
                     inference_trace_attempt.record_failed(
                         &mapped,
                         upstream_request_id,
@@ -2420,6 +2517,7 @@ where
 
     (
         ResponseStream {
+            tool_result_tx: None,
             rx_event,
             consumer_dropped: consumer_dropped_for_stream,
         },

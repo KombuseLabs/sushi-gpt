@@ -1894,6 +1894,20 @@ impl ThreadManagerState {
         environments: Option<Vec<TurnEnvironmentSelection>>,
     ) -> CodexResult<NewThread> {
         let client_mcp_extensions = self.client_mcp_extensions_for_child(parent_thread_id).await;
+        let dynamic_tools = if config
+            .agent_model_routing
+            .as_ref()
+            .is_some_and(|r| r.inherit_dynamic_tools)
+            && let Some(parent_id) = parent_thread_id
+        {
+            self.get_thread(parent_id)
+                .await?
+                .session
+                .inherited_dynamic_tools()
+                .await
+        } else {
+            Vec::new()
+        };
         let options = StartThreadOptions {
             history_mode,
             session_source: Some(session_source),
@@ -1901,6 +1915,7 @@ impl ThreadManagerState {
             metrics_service_name,
             environments,
             client_mcp_extensions,
+            dynamic_tools,
             ..StartThreadOptions::new(config)
         };
         let mut request =

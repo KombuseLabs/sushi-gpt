@@ -1,4 +1,5 @@
 use crate::session::tests::update_turn_settings_for_test;
+use codex_config::config_toml::agent_model_routing::AgentModelRouting;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -2904,6 +2905,48 @@ async fn multi_agent_v2_message_schemas_are_encrypted() {
                 .get("message")
                 .and_then(|schema| schema.encrypted),
             Some(true)
+        );
+    }
+}
+
+#[tokio::test]
+async fn multi_agent_v2_plaintext_messages_clear_encryption_under_configured_namespace() {
+    let plan = probe(|turn| {
+        set_feature(turn, Feature::MultiAgentV2, /*enabled*/ true);
+        update_config(turn, |config| {
+            config.multi_agent_v2.tool_namespace = Some("agent_router_agents".to_string());
+            config.agent_model_routing = Some(AgentModelRouting {
+                enabled: true,
+                plaintext_messages: true,
+                ..Default::default()
+            });
+        });
+    })
+    .await;
+    plan.assert_visible_lacks(&[MULTI_AGENT_V2_NAMESPACE]);
+    let ToolSpec::Namespace(namespace) = plan.visible_spec("agent_router_agents") else {
+        panic!("expected agent_router_agents namespace");
+    };
+    for tool_name in ["spawn_agent", "send_message", "followup_task"] {
+        let Some(ResponsesApiNamespaceTool::Function(tool)) = namespace.tools.iter().find(|tool| {
+            matches!(
+                tool,
+                ResponsesApiNamespaceTool::Function(tool) if tool.name == tool_name
+            )
+        }) else {
+            panic!("expected {tool_name} in agent_router_agents namespace");
+        };
+        let properties = tool
+            .parameters
+            .properties
+            .as_ref()
+            .expect("tool should use object params");
+        assert_eq!(
+            properties
+                .get("message")
+                .and_then(|schema| schema.encrypted),
+            None,
+            "{tool_name} message must be declared plaintext"
         );
     }
 }

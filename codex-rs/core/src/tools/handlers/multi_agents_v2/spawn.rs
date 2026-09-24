@@ -16,6 +16,7 @@ use crate::tools::handlers::multi_agents_spec::SpawnAgentToolOptions;
 use crate::tools::handlers::multi_agents_spec::create_spawn_agent_tool_v2;
 use crate::tools::handlers::multi_agents_v2::message_tool::message_content;
 use crate::turn_timing::now_unix_timestamp_ms;
+use codex_config::config_toml::agent_model_routing::AgentModelRoutingTask;
 use codex_prompts::ResolvedModelMessages;
 use codex_protocol::AgentPath;
 use codex_protocol::ThreadId;
@@ -139,6 +140,7 @@ async fn handle_spawn_agent(
         step_context.as_ref(),
         SpawnConfigOptions {
             version: SpawnConfigVersion::V2,
+            task: AgentModelRoutingTask::V2TaskName(&args.task_name),
             full_history_fork: matches!(fork_mode, Some(SpawnAgentForkMode::FullHistory)),
             role_name,
             model: args.model.as_deref(),
@@ -148,6 +150,24 @@ async fn handle_spawn_agent(
     .await
     .map_err(FunctionCallError::RespondToModel)?;
     let config = prepared.config;
+    if matches!(
+        config.model_provider.wire_api,
+        codex_model_provider_info::WireApi::OpenResponses
+            | codex_model_provider_info::WireApi::ClaudeCli
+    ) && fork_mode.is_some()
+    {
+        return Err(FunctionCallError::RespondToModel(
+            "Foreign transport children currently require fork_turns=none.".to_string(),
+        ));
+    }
+    if config.model_provider_id != turn.config.model_provider_id
+        && (fork_mode.is_some()
+            || source != crate::tools::context::ToolCallSource::DirectPlaintextMessage)
+    {
+        return Err(FunctionCallError::RespondToModel(
+            "Cross-provider children require fork_turns=none and an explicitly declared plaintext assignment; encrypted assignments and history forks are unsupported.".to_string(),
+        ));
+    }
     let is_full_history_fork = matches!(fork_mode, Some(SpawnAgentForkMode::FullHistory));
     let spawn_source = thread_spawn_source(
         session.thread_id,
@@ -218,7 +238,14 @@ async fn handle_spawn_agent(
             ),
     )
     .await
-    .map_err(collab_spawn_error)?;
+    .map_err(collab_spawn_error);
+    if let Some(routing) = prepared.routing {
+        routing.record(
+            &call_id,
+            spawned_agent.as_ref().ok().map(|agent| agent.thread_id),
+        );
+    }
+    let spawned_agent = spawned_agent?;
     let new_thread_id = spawned_agent.thread_id;
     let agent_status = spawned_agent.status;
     let agent_snapshot = session

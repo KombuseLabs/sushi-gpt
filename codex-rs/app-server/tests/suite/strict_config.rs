@@ -1,6 +1,7 @@
 //! Config errors and startup/project warnings through the public API.
 
 use anyhow::Result;
+use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
 use codex_app_server_protocol::ConfigWarningNotification;
 use codex_app_server_protocol::ThreadStartParams;
@@ -11,14 +12,16 @@ use std::process::Command;
 use std::time::Duration;
 use tempfile::TempDir;
 use tokio::time::timeout;
+use wiremock::MockServer;
 
 #[tokio::test]
 async fn ignored_config_fields_emit_startup_and_project_warnings() -> Result<()> {
     let home = TempDir::new()?;
-    std::fs::write(
-        home.path().join("config.toml"),
-        "network_proxy = { nested = 'private_value' }",
-    )?;
+    let mock_provider = MockServer::start().await;
+    MockResponsesConfig::new(&mock_provider.uri())
+        .with_root_config("network_proxy = { nested = 'private_value' }")
+        .with_root_config("cli_auth_credentials_store = 'file'")
+        .write(home.path())?;
     std::fs::write(
         home.path().join("requirements.toml"),
         "allowed_permissions = [':read-only']",

@@ -19,6 +19,42 @@ use serde::Deserialize;
 use serde_json::Value;
 
 pub fn map_api_error(err: ApiError) -> CodexErr {
+    use codex_protocol::execution_error::ExecutionErrorStage as Stage;
+    // Only a provider 400 carries typed validation details worth extracting.
+    let validation = |status: &http::StatusCode, body: &str| {
+        (*status == http::StatusCode::BAD_REQUEST)
+            .then(|| crate::provider_validation::extract(body))
+    };
+    let context = match &err {
+        ApiError::Api { status, message } => Some((
+            Stage::ProviderResponse,
+            Some(status.as_u16()),
+            validation(status, message),
+        )),
+        ApiError::Transport(TransportError::Http { status, body, .. }) => Some((
+            Stage::ProviderResponse,
+            Some(status.as_u16()),
+            validation(status, body.as_deref().unwrap_or_default()),
+        )),
+        ApiError::Transport(TransportError::Build(_)) => {
+            Some((Stage::RequestPreparation, None, None))
+        }
+        ApiError::Transport(TransportError::ResponseTooLarge { .. }) => {
+            Some((Stage::ProviderResponse, None, None))
+        }
+        ApiError::Transport(_) => Some((Stage::Transport, None, None)),
+        _ => None,
+    };
+    let error = map_api_error_details(err);
+    match context {
+        Some((stage, status, validation)) => {
+            error.with_execution_context(stage, status, validation)
+        }
+        None => error,
+    }
+}
+
+fn map_api_error_details(err: ApiError) -> CodexErr {
     match err {
         ApiError::ContextWindowExceeded => CodexErr::ContextWindowExceeded,
         ApiError::QuotaExceeded => CodexErr::QuotaExceeded,

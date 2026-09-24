@@ -33,6 +33,8 @@ use tracing::instrument;
 
 pub use crate::tools::context::ToolCallSource;
 
+use crate::agent::child_config::model_routing::RESERVED_AGENT_TOOL_NAMESPACE;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ToolCall {
     pub tool_name: ToolName,
@@ -43,16 +45,26 @@ pub struct ToolCall {
 
 impl ToolCall {
     pub(crate) fn direct_source(&self) -> ToolCallSource {
-        if self.tool_name.namespace.as_deref() == Some("collaboration")
-            && matches!(
-                self.tool_name.name.as_str(),
-                "spawn_agent" | "send_message" | "followup_task"
-            )
-            && self
-                .encrypted_function_args
-                .as_ref()
-                .is_some_and(Vec::is_empty)
-        {
+        let agent_tool = matches!(
+            self.tool_name.name.as_str(),
+            "spawn_agent" | "send_message" | "followup_task"
+        );
+        // Only the backend-reserved `collaboration` tools ever carry encrypted arguments. Under
+        // that namespace a message is plaintext only when the model says so with an explicit
+        // empty `encrypted_function_args` list. Under any other configured namespace the
+        // backend does not own the tools and never encrypts them, and a live run showed the
+        // model then omits the field entirely; an unspecified value there is plaintext too.
+        // A non-empty list always means encrypted.
+        let own_namespace = self
+            .tool_name
+            .namespace
+            .as_deref()
+            .is_some_and(|namespace| namespace != RESERVED_AGENT_TOOL_NAMESPACE);
+        let declared_plaintext = match &self.encrypted_function_args {
+            Some(encrypted) => encrypted.is_empty(),
+            None => own_namespace,
+        };
+        if agent_tool && declared_plaintext {
             ToolCallSource::DirectPlaintextMessage
         } else {
             ToolCallSource::Direct

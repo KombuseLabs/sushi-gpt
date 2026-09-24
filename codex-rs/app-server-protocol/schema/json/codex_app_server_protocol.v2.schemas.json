@@ -4328,6 +4328,49 @@
           ],
           "title": "ActiveTurnNotSteerableCodexErrorInfo",
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "executionError": {
+              "properties": {
+                "category": {
+                  "$ref": "#/definitions/ExecutionErrorCategory"
+                },
+                "httpStatusCode": {
+                  "format": "uint16",
+                  "minimum": 0.0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "providerValidation": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/definitions/ProviderValidation"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "stage": {
+                  "$ref": "#/definitions/ExecutionErrorStage"
+                }
+              },
+              "required": [
+                "category",
+                "stage"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "executionError"
+          ],
+          "title": "ExecutionErrorCodexErrorInfo",
+          "type": "object"
         }
       ]
     },
@@ -6742,6 +6785,30 @@
       ],
       "title": "ErrorNotification",
       "type": "object"
+    },
+    "ExecutionErrorCategory": {
+      "description": "A closed classification of the error variant, never derived from error text.",
+      "enum": [
+        "invalidRequest",
+        "encoding",
+        "connection",
+        "timeout",
+        "stream",
+        "fatal",
+        "io",
+        "other"
+      ],
+      "type": "string"
+    },
+    "ExecutionErrorStage": {
+      "description": "The boundary at which an otherwise unclassified execution error was observed.",
+      "enum": [
+        "requestPreparation",
+        "transport",
+        "providerResponse",
+        "streamProcessing"
+      ],
+      "type": "string"
     },
     "ExperimentalFeature": {
       "properties": {
@@ -13652,6 +13719,124 @@
       "enum": [
         "position",
         "recencyAt"
+      ],
+      "type": "string"
+    },
+    "ProviderToolField": {
+      "description": "Structural tool fields only; JSON Schema property names are never retained.",
+      "enum": [
+        "type",
+        "name",
+        "description",
+        "parameters",
+        "strict",
+        "format"
+      ],
+      "type": "string"
+    },
+    "ProviderToolLocation": {
+      "additionalProperties": false,
+      "description": "A tool slot, optionally inside one namespace, with an optional structural field. Indices are limited to 0..=65535; null `field` identifies the tool object itself.",
+      "properties": {
+        "field": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProviderToolField"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "nestedToolIndex": {
+          "format": "uint16",
+          "maximum": 65535.0,
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "toolIndex": {
+          "format": "uint16",
+          "maximum": 65535.0,
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "toolIndex"
+      ],
+      "type": "object"
+    },
+    "ProviderValidation": {
+      "description": "Null fields explicitly represent unavailable or unrecognized validation detail.",
+      "properties": {
+        "code": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProviderValidationCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parameter": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProviderValidationParameter"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "toolLocation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProviderToolLocation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Available only for recognized, bounded `tools` locations."
+        }
+      },
+      "type": "object"
+    },
+    "ProviderValidationCode": {
+      "description": "Recognized structured provider validation codes; unknown values are not copied.",
+      "enum": [
+        "invalidRequestError",
+        "invalidValue",
+        "invalidType",
+        "missingRequiredParameter",
+        "unknownParameter",
+        "unsupportedParameter",
+        "unsupportedValue"
+      ],
+      "type": "string"
+    },
+    "ProviderValidationParameter": {
+      "description": "Root request parameter categories, never provider-supplied field names.",
+      "enum": [
+        "model",
+        "serviceTier",
+        "reasoning",
+        "tools",
+        "input",
+        "text",
+        "toolChoice",
+        "parallelToolCalls",
+        "instructions",
+        "include",
+        "store",
+        "stream",
+        "previousResponseId",
+        "clientMetadata",
+        "promptCacheKey"
       ],
       "type": "string"
     },

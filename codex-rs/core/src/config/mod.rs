@@ -253,7 +253,7 @@ pub(crate) const DEFAULT_MULTI_AGENT_V2_MAX_CONCURRENT_THREADS_PER_SESSION: usiz
 pub(crate) const DEFAULT_MULTI_AGENT_V2_MIN_WAIT_TIMEOUT_MS: i64 = 10_000;
 pub(crate) const DEFAULT_MULTI_AGENT_V2_MAX_WAIT_TIMEOUT_MS: i64 = 3600 * 1000;
 pub(crate) const DEFAULT_MULTI_AGENT_V2_DEFAULT_WAIT_TIMEOUT_MS: i64 = 30_000;
-const DEFAULT_MULTI_AGENT_V2_TOOL_NAMESPACE: &str = "collaboration";
+pub(crate) const DEFAULT_MULTI_AGENT_V2_TOOL_NAMESPACE: &str = "collaboration";
 
 pub(crate) const HARD_MIN_MULTI_AGENT_V2_TIMEOUT_MS: i64 = 0;
 pub(crate) const HARD_MAX_MULTI_AGENT_V2_TIMEOUT_MS: i64 =
@@ -898,6 +898,10 @@ pub struct Config {
 
     /// User-configured maximum number of spawned agent threads per session.
     pub agent_max_threads: Option<usize>,
+
+    /// Opt-in task-based model defaults evaluated at the native spawn boundary.
+    pub agent_model_routing:
+        Option<codex_config::config_toml::agent_model_routing::AgentModelRouting>,
 
     /// Default model for spawned subagents when the spawn call does not select one.
     pub agent_default_subagent_model: Option<String>,
@@ -3731,6 +3735,10 @@ impl Config {
             .unwrap_or_default();
         let terminal_resize_reflow = resolve_terminal_resize_reflow_config(&cfg);
 
+        if let Some(routing) = &cfg.agent_model_routing {
+            routing.validate().map_err(|message| std::io::Error::new(ErrorKind::InvalidInput, message))?;
+        }
+
         let agent_roles =
             load_agent_roles(fs, &cfg, &config_layer_stack, &mut startup_warnings).await?;
 
@@ -4271,6 +4279,7 @@ impl Config {
             tool_output_token_limit: cfg.tool_output_token_limit,
             agents_enabled,
             agent_max_threads,
+            agent_model_routing: cfg.agent_model_routing,
             agent_default_subagent_model,
             agent_default_subagent_reasoning_effort,
             agent_max_depth,
@@ -4452,6 +4461,20 @@ impl Config {
                 .unwrap_or_default(),
             otel,
         };
+        if config
+            .agent_model_routing
+            .as_ref()
+            .is_some_and(|routing| routing.plaintext_messages)
+            && config.multi_agent_v2.tool_namespace.as_deref()
+                == Some(DEFAULT_MULTI_AGENT_V2_TOOL_NAMESPACE)
+        {
+            return Err(std::io::Error::new(
+                ErrorKind::InvalidInput,
+                format!(
+                    "agent_model_routing.plaintext_messages changes the multi-agent tool schema, and the backend rejects a changed `{DEFAULT_MULTI_AGENT_V2_TOOL_NAMESPACE}` namespace with HTTP 400 on every turn. Set features.multi_agent_v2.tool_namespace to another name."
+                ),
+            ));
+        }
         Ok(config)
         })
         .await
@@ -4833,6 +4856,10 @@ pub fn find_codex_home() -> std::io::Result<AbsolutePathBuf> {
 pub fn log_dir(cfg: &Config) -> std::io::Result<PathBuf> {
     Ok(cfg.log_dir.clone())
 }
+
+#[cfg(test)]
+#[path = "agent_model_routing_tests.rs"]
+mod agent_model_routing_tests;
 
 #[cfg(test)]
 #[path = "config_tests.rs"]

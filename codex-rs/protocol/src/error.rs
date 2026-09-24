@@ -72,6 +72,7 @@ pub enum SandboxErr {
 pub struct CodexErr {
     details: CodexErrorDetails,
     server_retry_delay: Option<Duration>,
+    pub(crate) execution_context: Option<crate::execution_error::ExecutionErrorContext>,
 }
 
 /// The semantic category and diagnostic payload for a [`CodexErr`].
@@ -229,6 +230,7 @@ impl From<CodexErrorDetails> for CodexErr {
         Self {
             details,
             server_retry_delay: None,
+            execution_context: None,
         }
     }
 }
@@ -293,6 +295,7 @@ macro_rules! codex_err_unit_constructors {
             pub const $variant: Self = Self {
                 details: CodexErrorDetails::$variant,
                 server_retry_delay: None,
+            execution_context: None,
             };
         )*
     };
@@ -474,7 +477,15 @@ impl CodexErr {
             | CodexErrorDetails::ThreadNotFound(_)
             | CodexErrorDetails::AgentLimitReached { .. } => CodexErrorInfo::BadRequest,
             CodexErrorDetails::Sandbox(_) => CodexErrorInfo::SandboxError,
-            _ => CodexErrorInfo::Other,
+            _ => match self.execution_context {
+                Some(context) => CodexErrorInfo::ExecutionError {
+                    stage: context.stage,
+                    category: self.execution_category(),
+                    http_status_code: context.http_status_code,
+                    provider_validation: context.provider_validation,
+                },
+                None => CodexErrorInfo::Other,
+            },
         }
     }
 

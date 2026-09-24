@@ -60,6 +60,7 @@ name = "Ollama"
 base_url = "http://localhost:11434/v1"
         "#;
     let expected_provider = ModelProviderInfo {
+        cli_command: None,
         name: "Ollama".into(),
         base_url: Some("http://localhost:11434/v1".into()),
         model_catalog_url: None,
@@ -95,6 +96,7 @@ env_key = "AZURE_OPENAI_API_KEY"
 query_params = { api-version = "2025-04-01-preview" }
         "#;
     let expected_provider = ModelProviderInfo {
+        cli_command: None,
         name: "Azure".into(),
         base_url: Some("https://xxxxx.openai.azure.com/openai".into()),
         model_catalog_url: None,
@@ -134,6 +136,7 @@ env_http_headers = { "X-Example-Env-Header" = "EXAMPLE_ENV_VAR" }
 supports_standalone_web_search = true
         "#;
     let expected_provider = ModelProviderInfo {
+        cli_command: None,
         name: "Example".into(),
         base_url: Some("https://example.com".into()),
         model_catalog_url: None,
@@ -318,6 +321,7 @@ fn test_create_amazon_bedrock_provider() {
     assert_eq!(
         ModelProviderInfo::create_amazon_bedrock_provider(/*aws*/ None),
         ModelProviderInfo {
+            cli_command: None,
             name: "Amazon Bedrock".to_string(),
             base_url: None,
             model_catalog_url: None,
@@ -848,4 +852,23 @@ model_catalog_url = "https://gateway.example/codex/catalog?token=catalog-secret"
             .base_url,
         "https://gateway.example/v1"
     );
+}
+
+#[test]
+fn claude_cli_provider_keeps_local_command_without_http_credentials()
+-> Result<(), Box<dyn std::error::Error>> {
+    let info: ModelProviderInfo = toml::from_str(
+        r#"
+name = "Local Claude"
+wire_api = "claude_cli"
+cli_command = "claude"
+stream_max_retries = 8
+"#,
+    )?;
+    assert_eq!(info.wire_api, WireApi::ClaudeCli);
+    assert_eq!(info.cli_command.as_deref(), Some(Path::new("claude")));
+    assert_eq!(info.env_key, None);
+    assert_eq!(info.stream_max_retries(), 0);
+    assert!(toml::to_string(&info)?.contains("wire_api = \"claude_cli\""));
+    Ok(())
 }
