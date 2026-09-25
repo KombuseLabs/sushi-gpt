@@ -12,7 +12,7 @@
   "priority": 100,
   "supports_reasoning_summary_parameter": false,
   "support_verbosity": false,
-  "truncation_policy": {"mode": "tokens", "limit": 10000},
+  "truncation_policy": { "mode": "tokens", "limit": 10000 },
   "context_window": 32768,
   "experimental_supported_tools": [],
   "input_modalities": ["text"],
