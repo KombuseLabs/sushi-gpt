@@ -1,0 +1,162 @@
+name: SushiGPT unsigned CLI candidate
+
+# Build artifacts only. Tags, releases, signing and publishing are separate.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sushi-cli-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_BUILD_JOBS: "2"
+  CANDIDATE_TARGET: aarch64-apple-darwin
+
+jobs:
+  test:
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: ./.github/actions/setup-ci
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+      - uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: ${{ env.CANDIDATE_TARGET }}
+      - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
+        with:
+          tool: nextest
+          version: 0.9.103
+      - name: Test packaging and routing control
+        run: |
+          python3 -m unittest discover -s scripts/codex_package -p 'test_*.py'
+          python3 -m unittest discover -s .github/scripts -p 'test_smoke_cli_candidate.py'
+          python3 -m unittest discover -s scripts -p 'test_agent_model_routing.py'
+      - name: Test components and native integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p candidate-logs
+          just test --locked --cargo-profile dev-small --test-threads 2 \
+            -p codex-sushi-routing-policy -p codex-sushi-routing \
+            -p codex-sushi-claude-transport -p codex-sushi-diagnostics \
+            -p codex-protocol -p codex-api -p codex-extension-api --lib \
+            2>&1 | tee candidate-logs/components.log
+          just test --locked --cargo-profile dev-small --test-threads 2 \
+            --success-output immediate -p codex-core \
+            --test agent_model_routing --test execution_error --test realtime_failure \
+            2>&1 | tee candidate-logs/native.log
+          if grep -F 'Skipping test because' candidate-logs/native.log; then
+            echo 'Native acceptance returned early; candidate validation is incomplete.' >&2
+            exit 1
+          fi
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        if: always()
+        with:
+          name: sushi-cli-tests-${{ github.sha }}-${{ github.run_attempt }}
+          path: candidate-logs/
+          if-no-files-found: warn
+          retention-days: 14
+
+  package:
+    needs: test
+    runs-on: macos-15
+    timeout-minutes: 180
+    env:
+      CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: packed
+      # lzma-sys supports this switch; do not link to the runner's Homebrew xz.
+      LZMA_API_STATIC: "1"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: ./.github/actions/setup-ci
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          targets: ${{ env.CANDIDATE_TARGET }}
+      - uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: ${{ env.CANDIDATE_TARGET }}
+      - name: Build optimized CLI and companion
+        working-directory: codex-rs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          export STABLE_GIT_COMMIT="$GITHUB_SHA"
+          cargo build --locked --release --target "$CANDIDATE_TARGET" \
+            -p codex-cli --bin codex \
+            -p codex-code-mode-host --bin codex-code-mode-host
+      - name: Preserve compiler outputs and assemble unsigned candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_dir="$CARGO_TARGET_DIR/$CANDIDATE_TARGET/release"
+          artifact="sushigpt-cli-$CANDIDATE_TARGET-$GITHUB_SHA-unsigned"
+          mkdir -p dist
+          # Keep the compiler's ad-hoc signatures intact; no post-build signing identity is used.
+          # Unlike signed production releases, this candidate keeps unstripped binaries.
+          mkdir -p "$RUNNER_TEMP/candidate-symbols"
+          tar -C "$release_dir" -czf "$RUNNER_TEMP/candidate-symbols/$artifact-symbols.tar.gz" \
+            codex.dSYM codex-code-mode-host.dSYM
+          (cd "$RUNNER_TEMP/candidate-symbols" && shasum -a 256 ./*.tar.gz > SHA256SUMS)
+          # Preserve upstream packaging and workspace version; no release tag is chosen.
+          just assemble-codex-package --target "$CANDIDATE_TARGET" \
+            --cargo-profile release --variant codex \
+            --entrypoint-bin "$release_dir/codex" \
+            --code-mode-host-bin "$release_dir/codex-code-mode-host" \
+            --package-dir "$RUNNER_TEMP/cli-candidate" \
+            --archive-output "$GITHUB_WORKSPACE/dist/$artifact.tar.gz"
+          printf '%s\n' "$artifact" > "$RUNNER_TEMP/candidate-name"
+      - name: Smoke-test extracted package and write checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact="$(cat "$RUNNER_TEMP/candidate-name")"
+          python3 .github/scripts/smoke_cli_candidate.py \
+            "dist/$artifact.tar.gz" --report dist/smoke.json
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess
+          info = {
+              "sourceCommit": os.environ["GITHUB_SHA"],
+              "target": os.environ["CANDIDATE_TARGET"],
+              "cargoProfile": "release",
+              "developerIdSigned": False,
+              "notarized": False,
+              "rustc": subprocess.check_output(["rustc", "--version"], cwd="codex-rs", text=True).strip(),
+              "workflowRun": os.environ["GITHUB_RUN_ID"],
+          }
+          pathlib.Path("dist/build.json").write_text(json.dumps(info, indent=2) + "\n")
+          PY
+          (cd dist && shasum -a 256 ./*.tar.gz ./build.json ./smoke.json > SHA256SUMS)
+          {
+            echo 'Unsigned macOS ARM64 CLI candidate; not a signed public release.'
+            echo "Source: $GITHUB_SHA; profile: release."
+            echo 'No Developer ID signing, notarization, desktop or actual voice acceptance.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: sushi-cli-unsigned-${{ github.sha }}-${{ github.run_attempt }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: sushi-cli-symbols-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/candidate-symbols/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
