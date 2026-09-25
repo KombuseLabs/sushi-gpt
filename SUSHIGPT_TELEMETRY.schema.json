@@ -44,19 +44,13 @@
           "format": "uuid"
         },
         "parentTurnId": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "minLength": 1,
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9_./:@-]+$"
         },
         "callId": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "minLength": 1,
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9_./:@-]+$"
@@ -73,39 +67,25 @@
           ]
         },
         "requestedModel": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "minLength": 1,
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9_./:@-]+$"
         },
         "policyModel": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "minLength": 1,
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9_./:@-]+$"
         },
         "selectedModel": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "minLength": 1,
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9_./:@-]+$"
         },
         "source": {
-          "enum": [
-            "native",
-            "rule",
-            "jev",
-            "fallback"
-          ]
+          "enum": ["native", "rule", "jev", "fallback"]
         },
         "reasonCode": {
           "enum": [
@@ -190,28 +170,19 @@
           "const": "response_usage"
         },
         "sessionId": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "minLength": 1,
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9_./:@-]+$"
         },
         "threadId": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "minLength": 1,
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9_./:@-]+$"
         },
         "turnId": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "minLength": 1,
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9_./:@-]+$"
@@ -228,19 +199,13 @@
           ]
         },
         "parentTurnId": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "minLength": 1,
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9_./:@-]+$"
         },
         "rootTurnId": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "minLength": 1,
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9_./:@-]+$"
@@ -257,19 +222,13 @@
           ]
         },
         "requestId": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "minLength": 1,
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9_./:@-]+$"
         },
         "responseId": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "minLength": 1,
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9_./:@-]+$"
@@ -279,19 +238,13 @@
           "format": "uuid"
         },
         "requestedModel": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "minLength": 1,
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9_./:@-]+$"
         },
         "executedModel": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "minLength": 1,
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9_./:@-]+$"
@@ -302,45 +255,27 @@
               "type": "object",
               "properties": {
                 "inputTokens": {
-                  "type": [
-                    "integer",
-                    "null"
-                  ],
+                  "type": ["integer", "null"],
                   "minimum": 0
                 },
                 "outputTokens": {
-                  "type": [
-                    "integer",
-                    "null"
-                  ],
+                  "type": ["integer", "null"],
                   "minimum": 0
                 },
                 "cachedInputTokens": {
-                  "type": [
-                    "integer",
-                    "null"
-                  ],
+                  "type": ["integer", "null"],
                   "minimum": 0
                 },
                 "cacheWriteInputTokens": {
-                  "type": [
-                    "integer",
-                    "null"
-                  ],
+                  "type": ["integer", "null"],
                   "minimum": 0
                 },
                 "reasoningOutputTokens": {
-                  "type": [
-                    "integer",
-                    "null"
-                  ],
+                  "type": ["integer", "null"],
                   "minimum": 0
                 },
                 "totalTokens": {
-                  "type": [
-                    "integer",
-                    "null"
-                  ],
+                  "type": ["integer", "null"],
                   "minimum": 0
                 }
               },
@@ -360,26 +295,17 @@
           ]
         },
         "status": {
-          "enum": [
-            "completed",
-            "incomplete"
-          ]
+          "enum": ["completed", "incomplete"]
         },
         "transport": {
           "const": "claude_cli"
         },
         "transportInstanceId": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "format": "uuid"
         },
         "cliVersion": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "maxLength": 40,
           "pattern": "^[0-9.]+$"
         }
@@ -445,10 +371,7 @@
           "format": "uuid"
         },
         "parentTurnId": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "minLength": 1,
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9_./:@-]+$"
@@ -499,19 +422,13 @@
           "type": "boolean"
         },
         "recommendedModel": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "minLength": 1,
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9_./:@-]+$"
         },
         "httpStatusCode": {
-          "type": [
-            "integer",
-            "null"
-          ],
+          "type": ["integer", "null"],
           "minimum": 100,
           "maximum": 599
         }

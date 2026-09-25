@@ -4595,7 +4595,6 @@ dependencies = [
  "anyhow",
  "codex-extension-api",
  "codex-http-client",
- "codex-protocol",
  "codex-sushi-diagnostics",
  "codex-sushi-routing-policy",
  "pretty_assertions",
@@ -4616,7 +4615,6 @@ dependencies = [
  "pretty_assertions",
  "schemars 0.8.22",
  "serde",
- "serde_json",
  "toml 0.9.11+spec-1.1.0",
 ]
 

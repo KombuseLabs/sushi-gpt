@@ -13,7 +13,6 @@ workspace = true
 [dependencies]
 codex-extension-api = { workspace = true }
 codex-http-client = { workspace = true }
-codex-protocol = { workspace = true }
 codex-sushi-diagnostics = { workspace = true }
 codex-sushi-routing-policy = { workspace = true }
 serde = { workspace = true }
