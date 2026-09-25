@@ -2,6 +2,11 @@ name: rust-ci
 on:
   workflow_call:
   workflow_dispatch:
+    inputs:
+      windows:
+        description: Run deferred Windows checks (requires MSVC prerequisites)
+        type: boolean
+        default: false
 
 jobs:
   # --- Detect changed paths so the fast PR workflow only runs relevant jobs ---
@@ -162,9 +167,9 @@ jobs:
         uses: ./.github/actions/check-clean-worktree
 
   argument_comment_lint_prebuilt:
-    name: Argument comment lint - ${{ matrix.name }}
-    runs-on: ${{ matrix.runs_on || matrix.runner }}
-    timeout-minutes: ${{ matrix.timeout_minutes }}
+    name: Argument comment lint - ${{ matrix.platform.name }}
+    runs-on: ${{ matrix.platform.runs_on || matrix.platform.runner }}
+    timeout-minutes: ${{ matrix.platform.timeout_minutes }}
     needs: changed
     environment:
       name: bazel
@@ -172,7 +177,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
+        windows_enabled:
+          ["${{ github.event_name == 'workflow_dispatch' && inputs.windows }}"]
+        platform:
           - name: Linux
             runner: ubuntu-24.04
             timeout_minutes: 30
@@ -183,6 +190,13 @@ jobs:
             runner: windows-x64
             timeout_minutes: 30
             runs_on: ${{ fromJSON(vars.CI_WINDOWS_RUNNER || '"windows-2025"') }}
+        exclude:
+          - windows_enabled: false
+            platform:
+              name: Windows
+              runner: windows-x64
+              timeout_minutes: 30
+              runs_on: ${{ fromJSON(vars.CI_WINDOWS_RUNNER || '"windows-2025"') }}
     steps:
       - name: Check whether argument comment lint should run
         id: argument_comment_lint_gate
