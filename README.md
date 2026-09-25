@@ -4,7 +4,7 @@ A fork of OpenAI Codex built around one capable conversational agent that keeps 
 
 ![One conversational agent coordinating native agents with task-specific models and optional Jev classification.](.github/sushigpt-architecture.svg)
 
-*Vision: These route and model examples illustrate the intended direction, not a list of currently supported integrations. Model families can appear through multiple routes. See [Status](#status) for current capabilities and verification limits.*
+_Vision: These route and model examples illustrate the intended direction, not a list of currently supported integrations. Model families can appear through multiple routes. See [Status](#status) for current capabilities and verification limits._
 
 ## Principles
 
@@ -21,12 +21,12 @@ Provider compatibility depends on the configured model, catalog metadata and ins
 
 ## Development and contributions
 
-[Model routing](AGENT_MODEL_ROUTING.md) · [Jev configuration](jev-routing.example.toml) · [Telemetry](SUSHIGPT_TELEMETRY.md)
+[Model routing](AGENT_MODEL_ROUTING.md) | [Jev configuration](jev-routing.example.toml) | [Telemetry](SUSHIGPT_TELEMETRY.md)
 
-[Build instructions](docs/install.md) · [Contribution policy](docs/contributing.md)
+[Build instructions](docs/install.md) | [Contribution policy](docs/contributing.md)
 
 We welcome contributions only for bug fixes, security and safety issues or fixes, and system stability or reliability. **External feature PRs will not be merged.** See the [contribution policy](docs/contributing.md) for reporting and submission guidance.
 
 ---
 
-Built on [OpenAI Codex](https://github.com/openai/codex) · [Apache-2.0 license](LICENSE)
+Built on [OpenAI Codex](https://github.com/openai/codex) | [Apache-2.0 license](LICENSE)
