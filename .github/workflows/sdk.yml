@@ -2,6 +2,10 @@ name: sdk
 
 on:
   workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   python-sdk-installation:
@@ -37,7 +41,8 @@ jobs:
   sdks:
     # Optional JSON override accepts a label, label array, or runner-group object.
     runs-on: ${{ fromJSON(vars.CI_LINUX_RUNNER || '"ubuntu-24.04"') }}
-    timeout-minutes: 20
+    # Cold local builds need room before cache persistence and SDK validation.
+    timeout-minutes: 60
     environment:
       name: bazel
       deployment: false
@@ -72,8 +77,35 @@ jobs:
           target: x86_64-unknown-linux-gnu
           cache-scope: sdk
 
+      - name: Configure SDK action cache
+        id: action_cache
+        env:
+          CACHE_FINGERPRINT: ${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock', 'codex-rs/Cargo.lock', '.github/scripts/run-bazel-ci.sh', '.github/scripts/run_bazel_with_buildbuddy.py') }}
+          RUNNER_ARCH: ${{ runner.arch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cache_path="$HOME/.cache/bazel-disk-cache"
+          cache_prefix="sdk-actions-v1-${ImageOS:-linux}-${ImageVersion:-unknown}-${RUNNER_ARCH}-${CACHE_FINGERPRINT}-"
+          mkdir -p "$cache_path" "${RUNNER_TEMP}/sdk-bazel-diagnostics"
+          echo "path=$cache_path" >> "$GITHUB_OUTPUT"
+          echo "prefix=$cache_prefix" >> "$GITHUB_OUTPUT"
+          # Rotate immutable keys so failed cold builds can advance the cache.
+          echo "key=${cache_prefix}${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore SDK action cache
+        id: restore_action_cache
+        continue-on-error: true
+        timeout-minutes: 3
+        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: ${{ steps.action_cache.outputs.path }}
+          key: ${{ steps.action_cache.outputs.key }}
+          restore-keys: ${{ steps.action_cache.outputs.prefix }}
+
       - name: Build codex and the code-mode host with Bazel
         id: build_bazel
+        timeout-minutes: 45
         env:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         shell: bash
@@ -83,15 +115,20 @@ jobs:
           # BuildBuddy credentials are unavailable. This workflow needs the
           # built binaries on disk afterwards, so ask the wrapper to override
           # CI's default remote_download_minimal behavior.
-          ./.github/scripts/run-bazel-ci.sh \
+          # Exit as a normal failure before GitHub cancels the step, leaving
+          # time to save completed actions and diagnostics. Preserve pipefail.
+          timeout --signal=INT --kill-after=30s 44m \
+            ./.github/scripts/run-bazel-ci.sh \
             --remote-download-toplevel \
             -- \
             build \
+            --profile="${RUNNER_TEMP}/sdk-bazel-diagnostics/build-profile.json.gz" \
             --build_metadata=COMMIT_SHA=${GITHUB_SHA} \
             --build_metadata=TAG_job=sdk \
             -- \
             //codex-rs/cli:codex \
-            //codex-rs/code-mode-host:codex-code-mode-host
+            //codex-rs/code-mode-host:codex-code-mode-host \
+            2>&1 | tee "${RUNNER_TEMP}/sdk-bazel-diagnostics/build.log"
 
           cquery_output="$(
             ./.github/scripts/run-bazel-ci.sh \
@@ -114,6 +151,67 @@ jobs:
           mkdir -p "${install_dir}"
           install -m 755 "${bazel_output_paths[@]}" "${install_dir}"
           echo "CODEX_EXEC_PATH=${install_dir}/codex" >> "$GITHUB_ENV"
+
+      - name: Record SDK cache and build outcome
+        id: cache_metrics
+        if: always() && !cancelled() && (steps.build_bazel.outcome == 'success' || steps.build_bazel.outcome == 'failure')
+        timeout-minutes: 1
+        continue-on-error: true
+        env:
+          CACHE_PATH: ${{ steps.action_cache.outputs.path }}
+          CACHE_MATCH: ${{ steps.restore_action_cache.outputs.cache-matched-key }}
+          CACHE_KEY: ${{ steps.action_cache.outputs.key }}
+          BUILD_OUTCOME: ${{ steps.build_bazel.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cache_kib=$(du -sk "$CACHE_PATH" | cut -f1)
+          # Bound this pilot's cache generation without changing storage quotas.
+          if (( cache_kib <= 5 * 1024 * 1024 )); then
+            echo "save=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "save=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::SDK action cache exceeds 5 GiB; skipping this generation."
+          fi
+          {
+            echo "Build outcome: $BUILD_OUTCOME"
+            echo "Restored action cache: ${CACHE_MATCH:-miss}"
+            echo "Action cache generation: $CACHE_KEY"
+            echo "Action cache size (KiB): $cache_kib"
+            echo "Runner image: ${ImageOS:-unknown} ${ImageVersion:-unknown}"
+            echo "Source: $GITHUB_SHA"
+          } | tee "${RUNNER_TEMP}/sdk-bazel-diagnostics/cache.txt" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload SDK Bazel diagnostics
+        if: always() && !cancelled() && (steps.build_bazel.outcome == 'success' || steps.build_bazel.outcome == 'failure')
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: sdk-bazel-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/sdk-bazel-diagnostics
+            ${{ runner.temp }}/bazel-execution-logs
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Save SDK action cache
+        if: always() && !cancelled() && steps.cache_metrics.outputs.save == 'true'
+        continue-on-error: true
+        timeout-minutes: 3
+        uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: ${{ steps.action_cache.outputs.path }}
+          key: ${{ steps.action_cache.outputs.key }}
+
+      - name: Save bazel repository cache
+        if: always() && !cancelled() && (steps.build_bazel.outcome == 'success' || steps.build_bazel.outcome == 'failure') && steps.setup_bazel.outputs.repository-cache-hit != 'true'
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: ${{ steps.setup_bazel.outputs.repository-cache-path }}
+          key: ${{ steps.setup_bazel.outputs.repository-cache-key }}
 
       - name: Warm up Bazel-built codex
         shell: bash
@@ -145,14 +243,6 @@ jobs:
           uv run --only-group dev --frozen --no-sync ruff check --output-format=github .
           uv run --only-group dev --frozen --no-sync ruff format --check .
           uv run --only-group dev --frozen --no-sync pytest
-
-      - name: Save bazel repository cache
-        if: always() && !cancelled() && steps.build_bazel.outcome == 'success' && steps.setup_bazel.outputs.repository-cache-hit != 'true'
-        continue-on-error: true
-        uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
-        with:
-          path: ${{ steps.setup_bazel.outputs.repository-cache-path }}
-          key: ${{ steps.setup_bazel.outputs.repository-cache-key }}
 
       - name: Check for a clean worktree
         if: always() && !cancelled()
