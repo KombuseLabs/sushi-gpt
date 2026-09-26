@@ -15,12 +15,23 @@ use wiremock::matchers::header;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
 
+fn answer(choice: &str, confidence: f64, probabilities: &[(&str, f64)]) -> JevDecision {
+    JevDecision {
+        choice: choice.to_string(),
+        confidence,
+        probabilities: probabilities
+            .iter()
+            .map(|(label, probability)| (label.to_string(), *probability))
+            .collect(),
+    }
+}
+
 #[test_case("valid", None)]
 #[test_case("missing_key", Some(JevFallback::MissingKey))]
 #[test_case("empty_key", Some(JevFallback::MissingKey))]
-#[test_case("low_confidence", Some(JevFallback::Uncertain))]
-#[test_case("abstain", Some(JevFallback::Uncertain))]
-#[test_case("tie", Some(JevFallback::Uncertain))]
+#[test_case("low_confidence", Some(JevFallback::Uncertain(answer("small", 0.1, &[("small", 0.9), ("abstain", 0.1)]))))]
+#[test_case("abstain", Some(JevFallback::Uncertain(answer("abstain", 0.9, &[("small", 0.1), ("abstain", 0.9)]))))]
+#[test_case("tie", Some(JevFallback::Uncertain(answer("small", 0.9, &[("small", 0.5), ("abstain", 0.5)]))))]
 #[test_case("unknown_class", Some(JevFallback::InvalidResponse))]
 #[test_case("not_highest", Some(JevFallback::InvalidResponse))]
 #[test_case("bad_sum", Some(JevFallback::InvalidResponse))]
@@ -110,10 +121,7 @@ async fn jev_http_contract(scenario: &str, expected: Option<JevFallback>) -> any
         result,
         match expected {
             Some(reason) => Err(reason),
-            None => Ok(JevDecision {
-                choice: "small".to_string(),
-                confidence: 0.9
-            }),
+            None => Ok(answer("small", 0.9, &[("small", 0.9), ("abstain", 0.1)])),
         }
     );
     if !no_key {
@@ -131,5 +139,59 @@ async fn jev_http_contract(scenario: &str, expected: Option<JevFallback>) -> any
             .expect("redirect requests")
             .is_empty()
     );
+    Ok(())
+}
+
+#[test_case(0, "Milch\nEier\tBrot", None; "unset limit keeps the name only state")]
+#[test_case(4096, "Milch\nEier\tBrot\r\u{7f}", Some("Milch\nEierBrot"); "strips control characters other than newline")]
+#[test_case(5, "Milché", Some("Milch"); "cuts at exactly the byte limit")]
+#[test_case(6, "Milché", Some("Milch"); "never splits a utf8 sequence")]
+#[test_case(7, "Milché", Some("Milché"); "keeps a character that ends on the limit")]
+#[test_case(7, "🍣🍣", Some("🍣"); "handles four byte characters")]
+#[tokio::test]
+async fn jev_state_carries_a_bounded_plaintext_excerpt(
+    max_bytes: u32,
+    message: &str,
+    expected: Option<&str>,
+) -> anyhow::Result<()> {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/systemone"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "answers":{"route":{"type":"choice","choice":"small","confidence":0.9,"probabilities":{"small":0.9,"abstain":0.1}}}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let factory = HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault);
+    let endpoint = format!("{}/v1/systemone", server.uri());
+    let decision = super::classify_jev(
+        &factory,
+        JevRequest {
+            endpoint: &endpoint,
+            model: "jev-1.13.0",
+            state: super::super::jev::state("fixture_task", "default", Some(message), max_bytes),
+            instructions: "Classify the synthetic task",
+            criteria: [("small", "Small task"), ("abstain", "Unknown")].into(),
+            timeout: Duration::from_millis(1500),
+            min_confidence: 0.8,
+        },
+        Some("synthetic-key"),
+        || {},
+    )
+    .await;
+    assert_eq!(
+        decision,
+        Ok(answer("small", 0.9, &[("small", 0.9), ("abstain", 0.1)]))
+    );
+    let requests = server.received_requests().await.expect("recorded requests");
+    assert_eq!(requests.len(), 1);
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body)?;
+    let mut expected_state = json!({"task_name":"fixture_task","agent_type":"default"});
+    if let Some(excerpt) = expected {
+        assert!(excerpt.len() <= max_bytes as usize);
+        expected_state["task_message"] = json!(excerpt);
+    }
+    assert_eq!(body["state"], expected_state);
     Ok(())
 }

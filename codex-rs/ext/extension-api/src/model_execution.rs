@@ -54,6 +54,8 @@ pub enum RoutingSource {
     Disabled,
     Rule,
     Jev,
+    /// A configured class selected after a recoverable classifier failure.
+    FallbackClass,
 }
 
 impl RoutingSource {
@@ -65,6 +67,7 @@ impl RoutingSource {
             Self::Disabled => "disabled",
             Self::Rule => "rule",
             Self::Jev => "jev",
+            Self::FallbackClass => "fallback_class",
         }
     }
 }

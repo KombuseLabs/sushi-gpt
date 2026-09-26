@@ -3,6 +3,7 @@ mod classifier;
 mod request;
 mod writer;
 
+pub use classifier::ClassifierAnswer;
 pub use classifier::ClassifierAttempt;
 use codex_protocol::ThreadId;
 use request::RequestAttempt;
@@ -36,13 +37,15 @@ pub enum Reason {
     Cancelled,
 }
 
+/// Origin of a routing proposal, independent of its classifier outcome.
 #[derive(Serialize)]
-#[serde(rename_all = "lowercase")]
-enum Source {
+#[serde(rename_all = "snake_case")]
+pub enum Source {
     Native,
     Rule,
     Jev,
     Fallback,
+    FallbackClass,
 }
 
 #[derive(Serialize)]
@@ -78,20 +81,10 @@ impl Decision {
         requested_model: Option<&str>,
         policy_model: Option<&str>,
         selected_model: Option<&str>,
+        source: Source,
         reason_code: Reason,
     ) -> Option<Self> {
         writer::emitter()?;
-        let source = match reason_code {
-            Reason::RuleMatched => Source::Rule,
-            Reason::JevSelected => Source::Jev,
-            Reason::Native
-            | Reason::Explicit
-            | Reason::FullHistory
-            | Reason::RoutingOff
-            | Reason::RulesOnly
-            | Reason::JevDisabled => Source::Native,
-            _ => Source::Fallback,
-        };
         Some(Self {
             decision_id: Uuid::new_v4(),
             parent_thread_id,
@@ -141,6 +134,34 @@ impl codex_extension_api::RoutingObserver for Decision {
         self.child_thread_id = child_thread_id;
         if let Some(emitter) = writer::emitter() {
             emitter.emit(Record::RoutingDecision(*self));
+        }
+    }
+}
+
+impl From<Reason> for Source {
+    fn from(reason: Reason) -> Self {
+        match reason {
+            Reason::RuleMatched => Source::Rule,
+            Reason::JevSelected => Source::Jev,
+            Reason::Native
+            | Reason::Explicit
+            | Reason::FullHistory
+            | Reason::RoutingOff
+            | Reason::RulesOnly
+            | Reason::JevDisabled => Source::Native,
+            Reason::ControlInvalid
+            | Reason::InvalidTargetSettings
+            | Reason::UnsupportedInput
+            | Reason::UnavailableModel
+            | Reason::MissingKey
+            | Reason::Transport
+            | Reason::Timeout
+            | Reason::Http
+            | Reason::OversizedResponse
+            | Reason::InvalidResponse
+            | Reason::Uncertain
+            | Reason::RequestStarted
+            | Reason::Cancelled => Source::Fallback,
         }
     }
 }

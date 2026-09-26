@@ -1,5 +1,6 @@
 //! Optional routing implementation. Native spawning and validation remain in the host.
 mod control;
+mod jev;
 mod transport;
 use codex_extension_api::AgentRouting;
 use codex_extension_api::ExtensionFuture;
@@ -12,7 +13,6 @@ use codex_sushi_diagnostics::Decision;
 use codex_sushi_diagnostics::Reason;
 use codex_sushi_routing_policy::AgentModelRoutingTask;
 use control::Mode;
-use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
 use transport::JevFallback;
@@ -35,6 +35,11 @@ impl AgentRouting for Router {
                 request.explicit_model,
                 selection.model.as_deref(),
                 None,
+                if selection.source == Some(RoutingSource::FallbackClass) {
+                    codex_sushi_diagnostics::Source::FallbackClass
+                } else {
+                    reason.into()
+                },
                 reason,
             )
             .map(|decision| Box::new(decision) as _);
@@ -100,8 +105,13 @@ async fn select(
     let Some(settings) = routing.jev.as_ref().filter(|j| j.enabled) else {
         return (selection, Reason::JevDisabled);
     };
-    let AgentModelRoutingTask::V2TaskName(task_name) = request.task else {
-        return (selection, Reason::UnsupportedInput);
+    let (task_name, plaintext_message) = match request.task {
+        AgentModelRoutingTask::V1Message(_) => return (selection, Reason::UnsupportedInput),
+        AgentModelRoutingTask::V2TaskName(name) => (name, None),
+        AgentModelRoutingTask::V2PlaintextTask { task_name, message } => (
+            task_name,
+            Some(message).filter(|_| routing.plaintext_messages),
+        ),
     };
     if task_name.trim().is_empty() || task_name.len() > 256 || request.role.len() > 256 {
         return (selection, Reason::UnsupportedInput);
@@ -124,7 +134,12 @@ async fn select(
         JevRequest {
             endpoint: &settings.endpoint,
             model: &settings.model,
-            state: json!({"task_name":task_name,"agent_type":request.role}),
+            state: jev::state(
+                task_name,
+                request.role,
+                plaintext_message,
+                settings.task_message_max_bytes,
+            ),
             instructions: &settings.instructions,
             criteria,
             timeout: Duration::from_millis(settings.timeout_ms),
@@ -134,32 +149,50 @@ async fn select(
         || attempt.request_started(),
     )
     .await;
-    let decision = match decision {
-        Ok(decision) => decision,
+    let (class, source, reason) = match decision {
+        Ok(decision) => {
+            attempt.answered(&decision, settings.min_confidence);
+            let Some(class) = settings.classes.get(&decision.choice) else {
+                return (selection, Reason::InvalidResponse);
+            };
+            tracing::info!(target: "agent_model_routing", source = "jev", class = %decision.choice, confidence = decision.confidence, classifier_model = %settings.model, "classifier selected a configured class");
+            attempt.recommended(&class.model);
+            (class, RoutingSource::Jev, Reason::JevSelected)
+        }
         Err(fallback) => {
-            if let JevFallback::Http(status) = fallback {
-                attempt.http_status(status);
+            let reason = match &fallback {
+                JevFallback::MissingKey => Reason::MissingKey,
+                JevFallback::Transport => Reason::Transport,
+                JevFallback::Timeout => Reason::Timeout,
+                JevFallback::Http(status) => {
+                    attempt.http_status(*status);
+                    Reason::Http
+                }
+                JevFallback::OversizedResponse => Reason::OversizedResponse,
+                JevFallback::InvalidResponse => Reason::InvalidResponse,
+                JevFallback::Uncertain(answer) => {
+                    attempt.answered(answer, settings.min_confidence);
+                    Reason::Uncertain
+                }
+            };
+            // Configuration faults must remain visible rather than selecting a fallback.
+            if matches!(fallback, JevFallback::MissingKey) {
+                tracing::info!(target: "agent_model_routing", ?fallback, "Jev routing fell back to native defaults");
+                return (selection, reason);
             }
-            tracing::info!(target: "agent_model_routing", ?fallback, "Jev routing fell back to native defaults");
-            return (
-                selection,
-                match fallback {
-                    JevFallback::MissingKey => Reason::MissingKey,
-                    JevFallback::Transport => Reason::Transport,
-                    JevFallback::Timeout => Reason::Timeout,
-                    JevFallback::Http(_) => Reason::Http,
-                    JevFallback::OversizedResponse => Reason::OversizedResponse,
-                    JevFallback::InvalidResponse => Reason::InvalidResponse,
-                    JevFallback::Uncertain => Reason::Uncertain,
-                },
-            );
+            let Some(class) = settings
+                .fallback_class
+                .as_ref()
+                .and_then(|name| settings.classes.get(name))
+            else {
+                tracing::info!(target: "agent_model_routing", ?fallback, "Jev routing fell back to native defaults");
+                return (selection, reason);
+            };
+            tracing::info!(target: "agent_model_routing", ?fallback, "Jev routing fell back to the configured fallback class");
+            attempt.finish(reason);
+            (class, RoutingSource::FallbackClass, reason)
         }
     };
-    tracing::info!(target: "agent_model_routing", source = "jev", class = %decision.choice, confidence = decision.confidence, classifier_model = %settings.model, "classifier selected a configured class");
-    let Some(class) = settings.classes.get(&decision.choice) else {
-        return (selection, Reason::InvalidResponse);
-    };
-    attempt.recommended(&class.model);
     if class.model_provider.is_none() && !host.validate_candidate(class).await {
         tracing::info!(target: "agent_model_routing", reason = "invalid_target_settings", "Jev routing fell back to native defaults");
         return (selection, Reason::InvalidTargetSettings);
@@ -167,8 +200,8 @@ async fn select(
     selection.model = Some(class.model.clone());
     selection.model_provider = class.model_provider.clone();
     selection.reasoning_effort = class.reasoning_effort.clone();
-    selection.source = Some(RoutingSource::Jev);
-    (selection, Reason::JevSelected)
+    selection.source = Some(source);
+    (selection, reason)
 }
 
 pub fn install<C: Sync>(registry: &mut codex_extension_api::ExtensionRegistryBuilder<C>) {

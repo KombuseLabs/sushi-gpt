@@ -104,7 +104,8 @@
             "native",
             "rule",
             "jev",
-            "fallback"
+            "fallback",
+            "fallback_class"
           ]
         },
         "reasonCode": {
@@ -514,6 +515,53 @@
           ],
           "minimum": 100,
           "maximum": 599
+        },
+        "choice": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_]+$"
+        },
+        "confidence": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "probabilities": {
+          "anyOf": [
+            {
+              "type": "object",
+              "maxProperties": 17,
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[A-Za-z0-9_]+$"
+              },
+              "additionalProperties": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "minConfidence": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
         }
       },
       "required": [

@@ -4,7 +4,16 @@ use super::identifier;
 use super::writer;
 use codex_protocol::ThreadId;
 use serde::Serialize;
+use std::collections::BTreeMap;
 use uuid::Uuid;
+
+/// Validated classifier output containing only configured labels and probabilities.
+#[derive(Debug, PartialEq)]
+pub struct ClassifierAnswer {
+    pub choice: String,
+    pub confidence: f64,
+    pub probabilities: BTreeMap<String, f64>,
+}
 
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -27,6 +36,11 @@ pub(super) struct Transition {
     request_started: bool,
     recommended_model: Option<String>,
     http_status_code: Option<u16>,
+    // Set together once a well-formed answer exists: class labels and numbers only.
+    choice: Option<String>,
+    confidence: Option<f64>,
+    probabilities: Option<BTreeMap<String, f64>>,
+    min_confidence: Option<f64>,
 }
 
 pub struct ClassifierAttempt {
@@ -49,6 +63,10 @@ impl ClassifierAttempt {
                 request_started: false,
                 recommended_model: None,
                 http_status_code: None,
+                choice: None,
+                confidence: None,
+                probabilities: None,
+                min_confidence: None,
             },
             finished: false,
             succeeded: false,
@@ -68,6 +86,21 @@ impl ClassifierAttempt {
 
     pub fn http_status(&mut self, status: u16) {
         self.transition.http_status_code = Some(status);
+    }
+
+    /// Records a validated answer, decisive or not, with the threshold it was judged against.
+    /// Labels are bounded configured class names, so the record stays under the size cap.
+    pub fn answered(&mut self, answer: &ClassifierAnswer, min_confidence: f64) {
+        self.transition.choice = identifier(&answer.choice);
+        self.transition.confidence = Some(answer.confidence);
+        self.transition.probabilities = Some(
+            answer
+                .probabilities
+                .iter()
+                .filter_map(|(label, probability)| Some((identifier(label)?, *probability)))
+                .collect(),
+        );
+        self.transition.min_confidence = Some(min_confidence);
     }
 
     pub fn finish(&mut self, reason: Reason) {

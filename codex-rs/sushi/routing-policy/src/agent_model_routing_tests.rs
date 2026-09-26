@@ -1,5 +1,6 @@
 use super::*;
 use AgentModelRoutingTask::V1Message;
+use AgentModelRoutingTask::V2PlaintextTask;
 use AgentModelRoutingTask::V2TaskName;
 use pretty_assertions::assert_eq;
 
@@ -159,6 +160,27 @@ fn separates_message_and_name_matchers_and_preserves_role_filters_and_rule_order
         routing.rules.get(3)
     );
     assert_eq!(routing.select("reviewer", V2TaskName("unmatched")), None);
+    // A declared-plaintext V2 message is never a rule matcher, even for task_contains rules.
+    assert_eq!(
+        routing.select(
+            "reviewer",
+            V2PlaintextTask {
+                task_name: "unmatched",
+                message: "SUMMARIZE findings"
+            }
+        ),
+        None
+    );
+    assert_eq!(
+        routing.select(
+            "default",
+            V2PlaintextTask {
+                task_name: "extract_findings",
+                message: "unmatched"
+            }
+        ),
+        routing.rules.get(2)
+    );
 }
 
 #[test]
@@ -185,12 +207,30 @@ fn validates_jev_settings_and_defaults_without_enabling_requests() {
     config.validate().unwrap();
     assert!(!config.enabled);
     assert_eq!(config.jev.as_ref().unwrap().api_key_env, "TYPESAFE_API_KEY");
+    assert_eq!(config.jev.as_ref().unwrap().task_message_max_bytes, 0);
+    toml::from_str::<AgentModelRouting>(&valid.replace(
+        "enabled = true",
+        "enabled = true\ntask_message_max_bytes = 4096",
+    ))
+    .unwrap()
+    .validate()
+    .unwrap();
+    toml::from_str::<AgentModelRouting>(&valid.replace(
+        "enabled = true",
+        "enabled = true\nfallback_class = \"small\"",
+    ))
+    .unwrap()
+    .validate()
+    .unwrap();
     for setting in [
+        "fallback_class = 'abstain'",
+        "fallback_class = 'missing'",
         "timeout_ms = 0",
         "timeout_ms = 10001",
         "min_confidence = nan",
         "min_confidence = 1.1",
         "api_key_env = 'KEY WITH SPACES'",
+        "task_message_max_bytes = 4097",
         "endpoint = 'http://api.typesafe.ai/v1/systemone'",
         "endpoint = 'https://api.typesafe.ai.evil/v1/systemone'",
         "endpoint = 'http://127.0.0.1:1234@evil/v1/systemone'",

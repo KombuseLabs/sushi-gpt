@@ -8,6 +8,8 @@ use codex_config::config_toml::agent_model_routing::AgentModelRouting;
 use codex_config::config_toml::agent_model_routing::JevRouting;
 use codex_config::config_toml::agent_model_routing::JevRoutingClass;
 use codex_core::config::AgentRoleConfig;
+use codex_core::config::ConfigBuilder;
+use codex_core::config::LoaderOverrides;
 use codex_features::Feature;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::AgentStatus;
@@ -45,6 +47,9 @@ const TASK_NAME: &str = "summarize_routing_worker";
 const CALL: &str = "native-routing-spawn";
 const PARENT_MODEL: &str = "gpt-5.6-sol";
 const ROUTED_MODEL: &str = "gpt-5.6-terra";
+// Each test process receives only a synthetic credential. Do not mutate the environment
+// of a process running async tests or require developers to export a real API key.
+const JEV_KEY: &str = "SUSHI_JEV_SYNTHETIC_TEST_KEY";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Backend {
@@ -71,6 +76,8 @@ enum RoutingCase {
     RoleMismatch,
     FirstMatch,
     PlaintextV2,
+    /// No rule matches and the classifier fails recoverably; the configured fallback class applies.
+    JevFallbackClass,
 }
 
 #[test_case(Backend::V1, RoutingCase::Unregistered; "v1 configured routing requires registration")]
@@ -236,7 +243,7 @@ async fn run_routing(backend: Backend, case: RoutingCase, jev: Option<JevRouting
                     },
                 );
             }
-            let matcher = if case == RoutingCase::NoMatch {
+            let matcher = if matches!(case, RoutingCase::NoMatch | RoutingCase::JevFallbackClass) {
                 "unmatched"
             } else {
                 "SUMMARIZE"
@@ -348,7 +355,8 @@ async fn run_routing(backend: Backend, case: RoutingCase, jev: Option<JevRouting
         | RoutingCase::PartialHistory
         | RoutingCase::RoleOnly
         | RoutingCase::FirstMatch
-        | RoutingCase::PlaintextV2 => ROUTED_MODEL,
+        | RoutingCase::PlaintextV2
+        | RoutingCase::JevFallbackClass => ROUTED_MODEL,
         _ => PARENT_MODEL,
     };
     let snapshot = child.config_snapshot().await;
@@ -383,6 +391,7 @@ async fn run_routing(backend: Backend, case: RoutingCase, jev: Option<JevRouting
         | RoutingCase::FirstMatch
         | RoutingCase::PlaintextV2 => Some(ReasoningEffort::High),
         RoutingCase::ExplicitEffort | RoutingCase::RoleModel => Some(ReasoningEffort::Medium),
+        RoutingCase::JevFallbackClass => Some(ReasoningEffort::Low),
         _ => None,
     };
     if let Some(expected_effort) = expected_effort {
@@ -420,11 +429,9 @@ async fn run_routing(backend: Backend, case: RoutingCase, jev: Option<JevRouting
     Ok(())
 }
 
-// Each test process receives only a synthetic credential. Do not mutate the environment
-// of a process running async tests or require developers to export a real API key.
 #[test]
 fn jev_routing_uses_native_spawn_and_encrypted_context() -> Result<()> {
-    const KEY: &str = "SUSHI_JEV_SYNTHETIC_TEST_KEY";
+    const KEY: &str = JEV_KEY;
     if std::env::var(KEY).as_deref() != Ok("synthetic-fixture") {
         let status = std::process::Command::new(std::env::current_exe()?)
             .args([
@@ -456,21 +463,39 @@ fn jev_routing_uses_native_spawn_and_encrypted_context() -> Result<()> {
             (Backend::V2, RoutingCase::NoMatch, "uncertain", 1),
             (Backend::V2, RoutingCase::NoMatch, "outage", 1),
             (Backend::V2, RoutingCase::NoMatch, "timeout", 1),
+            // A message the model declared plaintext under the reserved namespace: without the
+            // operator's plaintext_messages policy the configured excerpt limit is ignored.
+            (Backend::V2, RoutingCase::PlaintextV2, "plaintext_without_policy", 1),
+            // fallback_class = "cheap": an unusable answer or a failed request selects that
+            // class's model and effort; a missing credential still keeps the native default.
+            (Backend::V2, RoutingCase::JevFallbackClass, "uncertain_fallback", 1),
+            (Backend::V2, RoutingCase::JevFallbackClass, "timeout_fallback", 1),
+            (Backend::V2, RoutingCase::NoMatch, "missing_key_fallback", 0),
         ] {
             let server = wiremock::MockServer::start().await;
+            let fallback_class = scenario.ends_with("_fallback");
+            let probabilities = if fallback_class {
+                json!({"small": 0.6, "cheap": 0.39, "abstain": 0.01})
+            } else {
+                json!({"small": 0.99, "abstain": 0.01})
+            };
             let mut response = wiremock::ResponseTemplate::new(if scenario == "outage" { 529 } else { 200 }).set_body_json(json!({
-                "model": "jev-1.13.0", "answers": {"route": {"type": "choice", "choice": "small", "confidence": if scenario == "uncertain" {0.2} else {0.95}, "probabilities": {"small": 0.99, "abstain": 0.01}}}
+                "model": "jev-1.13.0", "answers": {"route": {"type": "choice", "choice": "small", "confidence": if matches!(scenario, "uncertain" | "uncertain_fallback") {0.2} else {0.95}, "probabilities": probabilities}}
             }));
-            if scenario == "timeout" { response = response.set_delay(Duration::from_secs(1)); }
+            if matches!(scenario, "timeout" | "timeout_fallback") { response = response.set_delay(Duration::from_secs(1)); }
             wiremock::Mock::given(wiremock::matchers::method("POST"))
                 .and(wiremock::matchers::path("/v1/systemone"))
                 .and(wiremock::matchers::header("authorization", "Bearer synthetic-fixture"))
                 .respond_with(response).expect(requests).mount(&server).await;
             let settings = JevRouting {
                 enabled: !matches!(scenario, "disabled" | "disabled_with_rules"), endpoint: format!("{}/v1/systemone", server.uri()),
-                api_key_env: if scenario == "missing_key" {"SUSHI_JEV_MISSING_TEST_KEY"} else {KEY}.to_string(),
-                timeout_ms: if scenario == "timeout" {100} else {1500},
-                classes: [("small".to_string(), JevRoutingClass { capabilities: vec![], model_provider: None, description: "Synthetic bounded task".to_string(), model: if scenario == "unavailable" {"unavailable-fixture"} else {ROUTED_MODEL}.to_string(), reasoning_effort: Some(ReasoningEffort::High) })].into(),
+                api_key_env: if matches!(scenario, "missing_key" | "missing_key_fallback") {"SUSHI_JEV_MISSING_TEST_KEY"} else {KEY}.to_string(),
+                timeout_ms: if matches!(scenario, "timeout" | "timeout_fallback") {100} else {1500},
+                task_message_max_bytes: 4096,
+                fallback_class: fallback_class.then(|| "cheap".to_string()),
+                classes: std::iter::once(("small".to_string(), JevRoutingClass { capabilities: vec![], model_provider: None, description: "Synthetic bounded task".to_string(), model: if scenario == "unavailable" {"unavailable-fixture"} else {ROUTED_MODEL}.to_string(), reasoning_effort: Some(ReasoningEffort::High) }))
+                    .chain(fallback_class.then(|| ("cheap".to_string(), JevRoutingClass { capabilities: vec![], model_provider: None, description: "Cheapest class, used when classification is unusable".to_string(), model: ROUTED_MODEL.to_string(), reasoning_effort: Some(ReasoningEffort::Low) })))
+                    .collect(),
                 ..JevRouting::default()
             };
             run_routing(backend, case, Some(settings)).await?;
@@ -485,4 +510,50 @@ fn jev_routing_uses_native_spawn_and_encrypted_context() -> Result<()> {
         runtime::verify_runtime_control(KEY).await?;
         Ok(())
     })
+}
+
+/// `fallback_class` must name a configured class; an unknown name or `abstain` fails config loading.
+#[tokio::test]
+async fn jev_fallback_class_must_name_a_configured_class() -> Result<()> {
+    for (fallback, accepted) in [("small", true), ("abstain", false), ("missing", false)] {
+        let home = tempfile::tempdir()?;
+        std::fs::write(
+            home.path().join("config.toml"),
+            format!(
+                r#"
+[agent_model_routing]
+enabled = true
+[agent_model_routing.jev]
+enabled = true
+fallback_class = "{fallback}"
+[agent_model_routing.jev.classes.small]
+description = "Small fixture task"
+model = "{ROUTED_MODEL}"
+"#
+            ),
+        )?;
+        let loaded = ConfigBuilder::default()
+            .loader_overrides(LoaderOverrides::without_managed_config_for_tests())
+            .codex_home(home.path().to_path_buf())
+            .build()
+            .await;
+        match loaded {
+            Ok(config) => {
+                assert!(accepted, "fallback_class `{fallback}` must be rejected");
+                assert_eq!(
+                    config
+                        .agent_model_routing
+                        .and_then(|routing| routing.jev)
+                        .and_then(|jev| jev.fallback_class),
+                    Some("small".to_string())
+                );
+            }
+            Err(error) => {
+                assert!(!accepted, "fallback_class `{fallback}` must load: {error}");
+                assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+                assert!(error.to_string().contains("fallback_class"), "{error}");
+            }
+        }
+    }
+    Ok(())
 }

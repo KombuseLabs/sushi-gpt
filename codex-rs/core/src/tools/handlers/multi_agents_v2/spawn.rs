@@ -140,7 +140,16 @@ async fn handle_spawn_agent(
         step_context.as_ref(),
         SpawnConfigOptions {
             version: SpawnConfigVersion::V2,
-            task: AgentModelRoutingTask::V2TaskName(&args.task_name),
+            // Only a message the model declared plaintext is offered to the optional
+            // classifier; ciphertext stays opaque here as everywhere else.
+            task: if source == crate::tools::context::ToolCallSource::DirectPlaintextMessage {
+                AgentModelRoutingTask::V2PlaintextTask {
+                    task_name: &args.task_name,
+                    message: &message,
+                }
+            } else {
+                AgentModelRoutingTask::V2TaskName(&args.task_name)
+            },
             full_history_fork: matches!(fork_mode, Some(SpawnAgentForkMode::FullHistory)),
             role_name,
             model: args.model.as_deref(),
