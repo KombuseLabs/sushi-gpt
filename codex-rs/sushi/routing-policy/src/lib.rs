@@ -18,6 +18,12 @@ pub enum AgentModelRoutingTask<'a> {
     V1Message(&'a str),
     /// V2 exposes a task name; its message may be encrypted and is never inspected.
     V2TaskName(&'a str),
+    /// A V2 spawn whose message the model explicitly declared plaintext. Fixed rules still
+    /// match only the task name; the message is offered to the optional classifier alone.
+    V2PlaintextTask {
+        task_name: &'a str,
+        message: &'a str,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, JsonSchema)]
@@ -142,7 +148,10 @@ impl AgentModelRouting {
     ) -> Option<&AgentModelRoute> {
         let text = match task {
             AgentModelRoutingTask::V1Message(message) => message,
-            AgentModelRoutingTask::V2TaskName(name) => name,
+            AgentModelRoutingTask::V2TaskName(name)
+            | AgentModelRoutingTask::V2PlaintextTask {
+                task_name: name, ..
+            } => name,
         };
         if !self.enabled {
             return None;
@@ -156,7 +165,8 @@ impl AgentModelRouting {
                     }
                     &rule.task_contains
                 }
-                AgentModelRoutingTask::V2TaskName(_) => {
+                AgentModelRoutingTask::V2TaskName(_)
+                | AgentModelRoutingTask::V2PlaintextTask { .. } => {
                     if !rule.task_contains.is_empty() {
                         return false;
                     }

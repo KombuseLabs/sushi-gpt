@@ -133,15 +133,28 @@ apply afterward. A role may therefore replace a same-provider Jev-selected model
 subject to strict candidate validation. Cross-provider role changes are restricted as above. The
 final routing log reports the model after role overrides.
 
-**Data sent:** only the local V2 `task_name`, effective role name (`default` when
-omitted), configured classifier instructions and class descriptions/labels. There
-is no plaintext description, ciphertext, parent history, file content, repository
-path, or target-model name in the classifier payload. Task names and roles can
-still disclose information: enabling this option authorizes their transmission to
-TypeSafe. Names often omit important context; Jev cannot inspect the encrypted
-assignment or reliably determine its true difficulty. Enabling Jev itself does
-not change the spawn-tool schema or encryption behavior; `plaintext_messages`
-is a separate setting.
+**Data sent:** by default only the local V2 `task_name`, effective role name
+(`default` when omitted), configured classifier instructions and class
+descriptions/labels, as the state fields `task_name` and `agent_type`. There is
+no plaintext description, ciphertext, parent history, tool output, file content,
+repository path, credential, or target-model name in the classifier payload. Task
+names and roles can still disclose information: enabling this option authorizes
+their transmission to TypeSafe. Names often omit important context; from a name
+alone Jev cannot reliably determine the true difficulty, and it never inspects an
+encrypted assignment. No spawn-tool schema or encryption behavior is changed.
+
+**Optional task message excerpt:** `agent_model_routing.jev.task_message_max_bytes`
+(default `0`, maximum `4096`) adds a third state field, `task_message`, holding the
+child's initial task text cut to at most that many bytes. It is sent only when all
+of the following hold: the key is greater than `0`, `agent_model_routing.plaintext_messages`
+is `true`, and the model declared the `spawn_agent` message plaintext (see the
+previous section). With `plaintext_messages = false` the key is ignored and the
+state stays name-only, even if a message happens to arrive in the clear. The
+excerpt strips control characters other than newline and is cut at the last UTF-8
+character boundary within the limit, so it never splits a multi-byte sequence.
+Conversation history, tool output and credentials are never included. Enabling
+the excerpt authorizes sending the task text to TypeSafe; adjust `instructions`
+accordingly, since the default text describes the name-only state.
 
 The client implements the official [TypeSafe Choice API](https://docs.typesafe.ai/api)
 at `POST https://api.typesafe.ai/v1/systemone` with bearer authentication. The
@@ -158,8 +171,8 @@ validation. `abstain` is an automatic extra class for insufficient evidence; use
 A valid response must contain a complete finite probability distribution, sum to
 one within 0.001, and select its unique largest entry. With
 `strict_candidates = false`, low confidence (default gate 0.8), abstention,
-ties, invalid distributions and failed candidate preflight preserve native
-defaults. Invalid target settings for a class without an explicit provider also
+ties and invalid distributions preserve native defaults unless the fallback class
+described below is configured. Failed candidate preflight preserves native defaults. Invalid target settings for a class without an explicit provider also
 fall back. Once a class with `model_provider` is selected, provider application
 and native model/role validation can fail the spawn instead of falling back.
 The confidence gate uses the API answer's separate `confidence` field, which must
@@ -170,11 +183,31 @@ the task correctly; calibrate the threshold for the workload.
 
 Missing/empty classifier credentials, HTTP failures (including 401/429/529),
 malformed or oversized responses and network failures also fall back to native
-defaults when `strict_candidates = false`. In strict mode these fallback paths
-fail spawning. Each eligible spawn makes at most one request, no retry, under a total HTTP timeout
-(default 1500 ms, configurable 100–10000 ms) and 32 KiB response cap. Native
+defaults when `strict_candidates = false` and no applicable fallback class is configured.
+In strict mode, falling back to native defaults fails spawning. Each eligible spawn makes at most one request, no retry, under a total HTTP timeout
+(default 1500 ms, configurable 100–10000 ms) and 32 KiB response cap.
+The HTTP deadline starts after synchronous client initialization, which remains
+blocking and is outside this budget; this is not an end-to-end wall-clock bound. Native
 configuration/catalog/role errors unrelated to Jev retain their existing behavior.
 The classifier uses direct HTTP, so its call cannot re-enter agent routing.
+
+**Fallback class:** the native default is the coordinator's own model. For a
+cost-minimizing policy, after verifying candidate prices, set
+`agent_model_routing.jev.fallback_class` to the key of the cheapest entry in
+`jev.classes`; configuration loading rejects an unknown name and `abstain`. When
+set, an unusable answer (abstain, confidence below `min_confidence`, a tie) or a
+failed request (timeout, network or client failure, non-2xx HTTP status, oversized
+or malformed response) selects that class exactly as a classifier-selected class
+would be: its `model`, `model_provider` and `reasoning_effort`, subject to the
+same native target validation. Invalid same-provider target settings retain native
+defaults; an explicit-provider selection can fail native spawn validation. This
+setting does not implement automatic escalation after child failure. Configuration faults never use the fallback class and stay visible as the
+native default: a missing or empty credential, unsupported input (a V1 spawn or an
+out-of-bounds task name or role), and a candidate model or provider that is not
+available. The routing decision telemetry reports `source = "fallback_class"`
+with the classifier's own failure reason (see
+[SUSHIGPT_TELEMETRY.md](SUSHIGPT_TELEMETRY.md)); the routing log names the
+fallback reason and the final model.
 
 Credentials come only from `TYPESAFE_API_KEY` (or the configured `api_key_env`) in
 the native process environment. Do not put a key in this file or a chat. In zsh,
@@ -201,7 +234,11 @@ not proof of model selection: inspect the child request model and the routing lo
 Tests cover the HTTP contract with synthetic data and a native-spawn matrix that
 preserves encrypted messages and checks actual outbound child model/effort,
 including rule/explicit/role precedence, disabled/unconfigured behavior, partial
-and full forks, V1, missing key, unavailable model, low confidence, outage and timeout.
+and full forks, V1, missing key, unavailable model, low confidence, outage and timeout,
+plus low confidence and timeout with a configured `fallback_class`, a missing key
+that must not use it, and rejection of an unknown `fallback_class` at config load.
+The classifier state body is asserted with and without `task_message_max_bytes`,
+under both plaintext policies, and the excerpt cut is checked byte-exactly.
 A live TypeSafe call requires a locally supplied key and remains a separate check.
 
 ## Native integration and runtime switch

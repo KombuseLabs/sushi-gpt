@@ -19,15 +19,12 @@ pub struct JevRequest<'a> {
     pub min_confidence: f64,
 }
 
-/// Validated classification; confidence measures the class distribution, not task success.
-#[derive(Debug, PartialEq)]
-pub struct JevDecision {
-    pub choice: String,
-    pub confidence: f64,
-}
+use codex_sushi_diagnostics::ClassifierAnswer as JevDecision;
 
 /// Safe diagnostic reasons: no response bodies, URLs, task text, or credentials.
-#[derive(Debug, PartialEq, Eq)]
+/// `Uncertain` carries the well-formed answer that was not decisive (abstain, a tie, or a
+/// confidence below the configured minimum) so diagnostics can report it.
+#[derive(Debug, PartialEq)]
 pub enum JevFallback {
     MissingKey,
     Transport,
@@ -35,7 +32,7 @@ pub enum JevFallback {
     Http(u16),
     OversizedResponse,
     InvalidResponse,
-    Uncertain,
+    Uncertain(JevDecision),
 }
 
 #[derive(Deserialize)]
@@ -62,17 +59,15 @@ pub async fn classify_jev(
     let api_key = api_key
         .filter(|key| !key.trim().is_empty())
         .ok_or(JevFallback::MissingKey)?;
+    // Client construction is synchronous and can exceed the HTTP budget while loading
+    // platform TLS/proxy configuration. Start the request deadline only once it is ready.
+    let client = HttpClientBuilder::new()
+        .without_redirects()
+        .without_request_logging()
+        .connect_timeout(request.timeout)
+        .build_respecting_outbound_proxy_policy(factory, request.endpoint, ClientRouteClass::Other)
+        .map_err(|_| JevFallback::Transport)?;
     tokio::time::timeout(request.timeout, async {
-        let client = HttpClientBuilder::new()
-            .without_redirects()
-            .without_request_logging()
-            .connect_timeout(request.timeout)
-            .build_respecting_outbound_proxy_policy(
-                factory,
-                request.endpoint,
-                ClientRouteClass::Other,
-            )
-            .map_err(|_| JevFallback::Transport)?;
         let pending = client
             .post(request.endpoint)
             .bearer_auth(api_key)
@@ -135,19 +130,21 @@ pub async fn classify_jev(
         if answer.probabilities.values().any(|p| p > probability) {
             return Err(JevFallback::InvalidResponse);
         }
-        if answer.choice == "abstain"
+        let uncertain = answer.choice == "abstain"
             || answer.confidence < request.min_confidence
             || answer
                 .probabilities
                 .iter()
-                .any(|(name, p)| name != &answer.choice && p == probability)
-        {
-            return Err(JevFallback::Uncertain);
-        }
-        Ok(JevDecision {
+                .any(|(name, p)| name != &answer.choice && p == probability);
+        let decision = JevDecision {
             choice: answer.choice,
             confidence: answer.confidence,
-        })
+            probabilities: answer.probabilities,
+        };
+        if uncertain {
+            return Err(JevFallback::Uncertain(decision));
+        }
+        Ok(decision)
     })
     .await
     .map_err(|_| JevFallback::Timeout)?

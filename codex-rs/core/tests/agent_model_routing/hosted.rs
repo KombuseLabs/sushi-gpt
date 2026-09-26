@@ -77,6 +77,25 @@ fn native_hosted_child_uses_inherited_dynamic_tool_and_fails_closed() -> Result<
             }
             if phase == "succeeded" {
                 assert_eq!(event["recommendedModel"], MODEL);
+                assert_eq!(
+                    json!([
+                        event["choice"],
+                        event["confidence"],
+                        event["probabilities"],
+                        event["minConfidence"]
+                    ]),
+                    json!(["document", 0.99, {"document": 0.99, "abstain": 0.01}, 0.8])
+                );
+            } else {
+                assert_eq!(
+                    json!([
+                        event["choice"],
+                        event["confidence"],
+                        event["probabilities"],
+                        event["minConfidence"]
+                    ]),
+                    json!([null, null, null, null])
+                );
             }
         }
         assert!(!records.contains(ASSIGNMENT));
@@ -178,6 +197,13 @@ async fn exercise(scenario: &str) -> Result<()> {
     let missing = scenario == "missing_credential";
     let jev_endpoint = format!("{}/v1/systemone", root_server.uri());
     let use_jev = matches!(scenario, "jev" | "jev_outage" | "local_cli_jev");
+    // Plaintext policy plus a declared-plaintext spawn: the excerpt is sent only when the
+    // operator also sets a nonzero limit.
+    let task_message_max_bytes = if matches!(scenario, "jev" | "local_cli_jev") {
+        4096
+    } else {
+        0
+    };
     let mut builder = test_codex()
         .with_model(PARENT_MODEL)
         .with_model_info_override(PARENT_MODEL, |model| {
@@ -233,6 +259,7 @@ async fn exercise(scenario: &str) -> Result<()> {
                     enabled: !is_local_cli || use_jev,
                     api_key_env: KEY.into(),
                     endpoint: jev_endpoint.clone(),
+                    task_message_max_bytes,
                     classes: [(
                         "document".into(),
                         JevRoutingClass {
@@ -301,6 +328,26 @@ async fn exercise(scenario: &str) -> Result<()> {
         !root_body["tools"]
             .to_string()
             .contains("\"encrypted\":true")
+    );
+    let classifier_states = root_server
+        .received_requests()
+        .await
+        .expect("recorded parent requests")
+        .iter()
+        .filter(|request| request.url.path() == "/v1/systemone")
+        .map(|request| {
+            serde_json::from_slice::<serde_json::Value>(&request.body)
+                .expect("classifier request JSON")["state"]
+                .clone()
+        })
+        .collect::<Vec<_>>();
+    let mut expected_state = json!({"task_name": "document_fixture", "agent_type": "default"});
+    if task_message_max_bytes > 0 {
+        expected_state["task_message"] = json!(ASSIGNMENT);
+    }
+    assert_eq!(
+        classifier_states,
+        vec![expected_state; usize::from(use_jev)]
     );
     // "unspecified": the model omitted encrypted_function_args. Under the non-reserved namespace
     // the backend never encrypts, so the message is delivered as plaintext.

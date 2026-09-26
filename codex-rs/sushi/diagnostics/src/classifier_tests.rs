@@ -1,3 +1,4 @@
+use super::ClassifierAnswer as JevDecision;
 use super::*;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
@@ -8,13 +9,31 @@ fn classifier_lifecycle_is_bounded_and_has_one_terminal_event() -> anyhow::Resul
     let home = tempfile::tempdir()?;
     let (emitter, worker) = writer::open(home.path())?;
     let thread = ThreadId::new();
-    for scenario in ["skip", "success", "http", "cancel_before", "cancel_after"] {
+    let answer = |choice: &str, confidence: f64| JevDecision {
+        choice: choice.to_string(),
+        confidence,
+        probabilities: [
+            ("small".to_string(), 0.6),
+            ("abstain".to_string(), 0.4),
+            ("bad label\nprivate content".to_string(), 0.0),
+        ]
+        .into(),
+    };
+    for scenario in [
+        "skip",
+        "success",
+        "http",
+        "uncertain",
+        "cancel_before",
+        "cancel_after",
+    ] {
         let mut attempt = ClassifierAttempt::new(thread, "turn-1");
         attempt.emitter = Some(emitter.clone());
         match scenario {
             "skip" => attempt.finish(Reason::RuleMatched),
             "success" => {
                 attempt.request_started();
+                attempt.answered(&answer("small", 0.9), /*min_confidence*/ 0.8);
                 attempt.recommended("unsafe model\nprivate content");
                 attempt.finish(Reason::InvalidTargetSettings);
             }
@@ -22,6 +41,11 @@ fn classifier_lifecycle_is_bounded_and_has_one_terminal_event() -> anyhow::Resul
                 attempt.request_started();
                 attempt.http_status(400);
                 attempt.finish(Reason::Http);
+            }
+            "uncertain" => {
+                attempt.request_started();
+                attempt.answered(&answer("abstain", 0.3), /*min_confidence*/ 0.8);
+                attempt.finish(Reason::Uncertain);
             }
             "cancel_after" => attempt.request_started(),
             _ => {}
@@ -42,21 +66,118 @@ fn classifier_lifecycle_is_bounded_and_has_one_terminal_event() -> anyhow::Resul
                 r["reasonCode"],
                 r["requestStarted"],
                 r["recommendedModel"],
-                r["httpStatusCode"]
+                r["httpStatusCode"],
+                r["choice"],
+                r["confidence"],
+                r["probabilities"],
+                r["minConfidence"]
             ])
         })
         .collect::<Vec<_>>();
+    let probabilities = json!({"small": 0.6, "abstain": 0.4});
     assert_eq!(
         summaries,
         vec![
-            json!(["skipped", "rule_matched", false, null, null]),
-            json!(["request_started", "request_started", true, null, null]),
-            json!(["succeeded", "jev_selected", true, null, null]),
-            json!(["request_started", "request_started", true, null, null]),
-            json!(["failed", "http", true, null, 400]),
-            json!(["cancelled", "cancelled", false, null, null]),
-            json!(["request_started", "request_started", true, null, null]),
-            json!(["cancelled", "cancelled", true, null, null]),
+            json!([
+                "skipped",
+                "rule_matched",
+                false,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+            ]),
+            json!([
+                "request_started",
+                "request_started",
+                true,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+            ]),
+            json!([
+                "succeeded",
+                "jev_selected",
+                true,
+                null,
+                null,
+                "small",
+                0.9,
+                probabilities,
+                0.8
+            ]),
+            json!([
+                "request_started",
+                "request_started",
+                true,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+            ]),
+            json!(["failed", "http", true, null, 400, null, null, null, null]),
+            json!([
+                "request_started",
+                "request_started",
+                true,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+            ]),
+            json!([
+                "failed",
+                "uncertain",
+                true,
+                null,
+                null,
+                "abstain",
+                0.3,
+                probabilities,
+                0.8
+            ]),
+            json!([
+                "cancelled",
+                "cancelled",
+                false,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+            ]),
+            json!([
+                "request_started",
+                "request_started",
+                true,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+            ]),
+            json!([
+                "cancelled",
+                "cancelled",
+                true,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+            ]),
         ]
     );
     for row in &rows {
@@ -69,7 +190,7 @@ fn classifier_lifecycle_is_bounded_and_has_one_terminal_event() -> anyhow::Resul
             )
         );
     }
-    for pair in [(1, 2), (3, 4), (6, 7)] {
+    for pair in [(1, 2), (3, 4), (5, 6), (8, 9)] {
         assert_eq!(rows[pair.0]["attemptId"], rows[pair.1]["attemptId"]);
     }
     assert!(!records.contains("private content"));
